@@ -313,7 +313,12 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   fueguito 30%, tags/notas, payout pendiente con botones pay/other-bank/cancel/
   dismiss/sync, promo bonus). Races protegidas por `activeConversationId` +
   AbortController — **no romper ese patrón**.
-- `admin-sw.js` (v24, scope /adminprivado2026/): network-first no-store para el shell.
+- `admin-sw.js` (v25, scope /adminprivado2026/): network-first no-store para el shell.
+  Bumpear `CACHE_VERSION` en cada cambio de admin.js/admin.css.
+- Mensajes `type:'system'` en el chat del panel (`createMessageElement`): `adminOnly:true`
+  → VERDE + badge "🔒 INTERNO — el cliente NO lo ve" (el cliente nunca lo recibió);
+  sin `adminOnly` → NARANJA + 🤖 (automático que el cliente SÍ vio). El back debe seguir
+  proyectando `adminOnly` en el GET de mensajes y emitirlo en `_emitAdminOnlyChatNote`.
 - Servido por handlers propios con cache en memoria (`readFileCached`) + ADMIN_HOST
   check opcional; el catch-all bloquea todo otro path bajo /adminprivado2026/.
 - Secciones "Automatización" y "Estrategia de bonos" están marcadas "No se usa" en el

@@ -4,7 +4,32 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-08-13**
+> **Última actualización: 2026-08-28**
+
+## Sesión 2026-08-28
+
+### 100. PANEL — mensajes de sistema INTERNOS (adminOnly) en VERDE con etiqueta "🔒 INTERNO"; automáticos que el cliente sí vio en NARANJA con 🤖
+- **Réplica del repo hermano** `AUTOREEMBOLSOSjygactivo` (su WORKLOG #123, commit `77303c6`,
+  patch `docs/replicas/2026-08-25-interno-verde-automatico-naranja.patch`). Aplicado con
+  `git apply` limpio (sin conflictos: mismo código base).
+- **Problema que resuelve:** en el chat del panel TODOS los mensajes `type:'system'` se veían
+  iguales (naranja + 🔒), así que un agente no podía distinguir una nota interna ("Chat cerrado
+  por…", alerta de bonus fallido, comprobante repetido) de un mensaje automático que el cliente
+  SÍ recibió (confirmación de carga, `/sys_*`). El candado era engañoso.
+- **Cambio (solo panel, cero backend):**
+  - `admin.js` `createMessageElement`: si `message.adminOnly === true` → clase `internal` + badge
+    `🔒 INTERNO — el cliente NO lo ve` y SIN ícono; si no → ícono `🤖` (naranja de siempre).
+  - `admin.css`: `.icon-robot::before` + bloque `.message.system.internal` (verde, borde
+    `#25d366`) y `.internal-badge`.
+  - `admin-sw.js`: `CACHE_VERSION` v24 → **v25** (el panel sirve admin.js/css con cache del SW).
+- **Prerrequisito verificado en este backend:** el GET de mensajes proyecta `adminOnly: 1`
+  (`server.js` ~L5547) y `_emitAdminOnlyChatNote` (~L1350) guarda y emite por socket
+  `adminOnly: true`, así que tanto el historial como las notas en vivo caen en la rama verde.
+  Ambos caminos (carga inicial y socket) renderizan por `createMessageElement`.
+- **Validado:** `node --check` OK en admin.js y admin-sw.js. Sin migraciones; el back no cambia,
+  pero el deploy es necesario para que el panel tome el SW v25.
+  **PROBAR tras deploy:** cerrar un chat → "Chat cerrado por…" en verde con etiqueta; hacer una
+  carga → la confirmación al cliente en naranja con 🤖.
 
 ## Sesión 2026-08-13
 
