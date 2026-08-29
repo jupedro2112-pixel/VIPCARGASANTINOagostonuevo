@@ -25,9 +25,55 @@ async function getAllRefunds() {
   }
 }
 
-// TOMBSTONE (2026-07-28): canClaimDailyRefund ELIMINADA — el reembolso diario ya no
-// existe (reemplazado por el sistema de rangos bronce/plata/oro en semanal/mensual).
-// Rollback: git revert.
+// Fecha 'YYYY-MM-DD' en hora Argentina, desplazada `offsetDays` días respecto de hoy.
+// (El diario se decide por día ART, no por el reloj del server, que en AWS corre en UTC.)
+function _artDateStr(offsetDays) {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit'
+  });
+  const parts = fmt.formatToParts(new Date());
+  const get = (t) => parts.find(p => p.type === t).value;
+  const todayLocal = new Date(`${get('year')}-${get('month')}-${get('day')}T00:00:00-03:00`);
+  const target = new Date(todayLocal.getTime() + (offsetDays || 0) * 24 * 60 * 60 * 1000);
+  const tp = fmt.formatToParts(target);
+  const g = (t) => tp.find(p => p.type === t).value;
+  return `${g('year')}-${g('month')}-${g('day')}`;
+}
+
+// Verificar si el usuario puede reclamar el reembolso DIARIO (repuesto 2026-08-29).
+// Un reclamo por día ART: el período reembolsado es AYER (periodKey 'daily:YYYY-MM-DD',
+// el mismo que usa el índice único de RefundClaim). Se considera reclamado si existe
+// un claim con ese periodKey O uno hecho HOY (ART) — este último cubre filas
+// históricas sin periodKey. Próximo reclamo: mañana 00:00 ART.
+async function canClaimDailyRefund(userId) {
+  try {
+    const yesterdayStr = _artDateStr(-1);
+    const todayStr = _artDateStr(0);
+    const tomorrowStr = _artDateStr(1);
+    const todayStartArt = new Date(`${todayStr}T00:00:00-03:00`);
+    const nextClaimDate = new Date(`${tomorrowStr}T00:00:00-03:00`);
+
+    const [byPeriod, lastDaily] = await Promise.all([
+      RefundClaim.findOne({ userId, type: 'daily', periodKey: 'daily:' + yesterdayStr }).lean(),
+      RefundClaim.findOne({ userId, type: 'daily' }).sort({ claimedAt: -1 }).lean()
+    ]);
+
+    const claimedToday = !!byPeriod || (lastDaily && new Date(lastDaily.claimedAt) >= todayStartArt);
+    const canClaim = !claimedToday;
+
+    return {
+      canClaim,
+      nextClaim: canClaim ? null : nextClaimDate.toISOString(),
+      // Lo devuelve el claim exitoso para que la PWA arranque el contador sin re-consultar.
+      nextClaimAfterClaim: nextClaimDate.toISOString(),
+      lastClaim: (byPeriod && byPeriod.claimedAt) || (lastDaily && lastDaily.claimedAt) || null,
+      availableDays: 'Todos los días'
+    };
+  } catch (error) {
+    console.error('Error verificando reembolso diario:', error);
+    return { canClaim: false, nextClaim: null, availableDays: 'Todos los días' };
+  }
+}
 
 // Verificar si el usuario puede reclamar reembolso semanal
 async function canClaimWeeklyRefund(userId) {
@@ -168,6 +214,7 @@ function calculateRefundFromNetwin(netwin, percentage) {
 module.exports = {
   getUserRefunds,
   getAllRefunds,
+  canClaimDailyRefund,
   canClaimWeeklyRefund,
   canClaimMonthlyRefund,
   recordRefund,

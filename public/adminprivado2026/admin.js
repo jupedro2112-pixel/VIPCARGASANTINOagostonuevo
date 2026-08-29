@@ -5156,7 +5156,7 @@ async function loadCBUConfig() {
 }
 
 // ====== Rangos de reembolso bronce/plata/oro (solo admin general) ======
-// Reemplaza a los % fijos diario/semanal/mensual (2026-07-28).
+// Por rango: % semanal/mensual (`percent`) y % diario (`dailyPercent`, 2026-08-29).
 async function loadRefundTiers() {
     const form = document.getElementById('refundTiersForm');
     const header = document.getElementById('refundTiersHeader');
@@ -5175,9 +5175,12 @@ async function loadRefundTiers() {
         const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
         set('tierBronceUpTo', t.bronce && t.bronce.upTo);
         set('tierBroncePct', t.bronce && t.bronce.percent);
+        set('tierBronceDailyPct', t.bronce && t.bronce.dailyPercent);
         set('tierPlataUpTo', t.plata && t.plata.upTo);
         set('tierPlataPct', t.plata && t.plata.percent);
+        set('tierPlataDailyPct', t.plata && t.plata.dailyPercent);
         set('tierOroPct', t.oro && t.oro.percent);
+        set('tierOroDailyPct', t.oro && t.oro.dailyPercent);
     } catch (e) {
         console.error('Error cargando rangos de reembolso:', e);
     }
@@ -5192,9 +5195,12 @@ async function saveRefundTiers() {
     const body = {
         bronceUpTo: num('tierBronceUpTo'),
         broncePct: num('tierBroncePct'),
+        bronceDailyPct: num('tierBronceDailyPct'),
         plataUpTo: num('tierPlataUpTo'),
         plataPct: num('tierPlataPct'),
-        oroPct: num('tierOroPct')
+        plataDailyPct: num('tierPlataDailyPct'),
+        oroPct: num('tierOroPct'),
+        oroDailyPct: num('tierOroDailyPct')
     };
     try {
         const r = await authFetch('/api/admin/refund-tiers', {
@@ -5210,7 +5216,7 @@ async function saveRefundTiers() {
         const tb = t.bronce || {}, tp = t.plata || {}, to = t.oro || {};
         if (msg) {
             msg.style.color = '#00c853';
-            msg.textContent = `✅ Guardado: 🥉 hasta $${tb.upTo} = ${tb.percent}% · 🥈 hasta $${tp.upTo} = ${tp.percent}% · 🥇 ${to.percent}%`;
+            msg.textContent = `✅ Guardado: 🥉 hasta $${tb.upTo} = ${tb.percent}% (diario ${tb.dailyPercent}%) · 🥈 hasta $${tp.upTo} = ${tp.percent}% (diario ${tp.dailyPercent}%) · 🥇 ${to.percent}% (diario ${to.dailyPercent}%)`;
         }
         showToast('Rangos de reembolso actualizados', 'success');
     } catch (e) {
@@ -9292,7 +9298,7 @@ async function loadReembolsos() {
         const recent = j.recent || [];
         const typeLabels = { daily: 'Diario', weekly: 'Semanal', monthly: 'Mensual' };
         let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:18px;">';
-        html += _centRefundCard('📅 Diarios (descontinuado)', types.daily, '#4caf50');
+        html += _centRefundCard('📅 Diarios', types.daily, '#4caf50');
         html += _centRefundCard('📆 Semanales', types.weekly, '#2196f3');
         html += _centRefundCard('🗓️ Mensuales', types.monthly, '#d4af37');
         html += '</div>';

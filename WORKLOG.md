@@ -4,7 +4,89 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-08-28**
+> **Última actualización: 2026-08-29**
+
+## Sesión 2026-08-29
+
+### 101. REEMBOLSO DIARIO de vuelta — con % DIARIO propio por rango (🥉🥈🥇), editable en el panel
+- **Pedido del owner (con captura de un cliente preguntando "en la página se borró el reembolso
+  diario"):** volver a implementar el reembolso DIARIO "con todo lo que conlleva", sobre el sistema
+  de rangos vigente. Decisiones (vía preguntas): cada rango tiene un **% diario propio y editable**
+  (no el mismo % del semanal/mensual); valores iniciales 🥉 3% · 🥈 5% · 🥇 10% (iguales a los del
+  semanal/mensual: conservador si se deploya sin tocar el panel). El diario había sido eliminado
+  el 2026-07-28 (#97) — esta entrada REVIERTE esa decisión de producto manteniendo los rangos.
+- **Backend (`server.js`):**
+  - `REFUND_TIER_DEFAULTS`/`getRefundTiers()`: cada rango suma `dailyPercent`. Un
+    `Config['refundTiers']` guardado ANTES (sin ese campo) cae al default de su rango → no hay
+    migración de config. `computeRefundTier()` devuelve `percent` + `dailyPercent`; helper nuevo
+    `serializeRefundTiers()` para el front.
+  - Helper nuevo **`refundTierRangeForPeriodStart(startDateStr)`**: el mes que define el rango para
+    un período que ARRANCA en esa fecha (mes en curso a hoy, o el mes anterior COMPLETO). Lo usan el
+    diario (inicio = ayer) y el semanal (inicio = lunes; **refactor sin cambio de comportamiento**
+    del bloque inline de #97). Caso borde cubierto: el día 1 el diario reembolsa el último día del
+    mes pasado → rango del mes pasado completo (no 1 día del mes nuevo).
+  - **`POST /api/refunds/claim/daily` repuesto** (reemplaza al stub): mismo molde que el semanal —
+    lock Redis, `canClaimDailyRefund`, NETWIN de AYER (ART) vía `getYesterdayRangeArgentinaEpoch`,
+    rango por `dailyPercent`, guard `refundAmount <= 0` ANTES de reservar, **RefundClaim ANTES de
+    acreditar** (índice único `userId+type+periodKey` = `daily:YYYY-MM-DD`, patrón #96), borra la
+    reserva si `creditUserBalance` falla, pasa `jugayganaUserId` (sin lookup flaky), `.error` por
+    `jugaygana.errToString`, Transaction `refund`, Meta CAPI `refund_daily`, mensaje con el rango.
+  - `GET /api/refunds/status`: vuelve a consultar el netwin de ayer (4 llamadas en paralelo en vez de
+    3) y devuelve `daily` REAL (`canClaim`, `nextClaim`, `potentialAmount`, `netAmount`,
+    `percentage` = % diario del rango, `tier`, `period`); `tier` suma `dailyPercentage` y la tabla
+    `tiers` trae `percent` + `dailyPercent` por rango.
+  - `GET/POST /api/admin/refund-tiers`: acepta/devuelve `bronceDailyPct`/`plataDailyPct`/`oroDailyPct`
+    (0-100; ausente = mantiene). Log de auditoría con ambos %.
+  - Mensajes: fallback + seed de `/sys_welcome` ("Reembolso DIARIO, SEMANAL y MENSUAL según tu
+    RANGO") y de `/sys_deposit`/`/sys_deposit_bonus` ("tenes reembolso DIARIO (todos los dias, de lo
+    perdido ayer), SEMANAL… y MENSUAL… segun tu rango"). **Migración one-shot
+    `migration_daily_refund_back_done`**: reemplazo por SUBSTRING en esos 3 comandos (respeta
+    ediciones del owner alrededor; si reescribió la frase entera, revisar COMANDOS tras el deploy).
+  - Ticker `/api/claims-feed`: los ejemplos vuelven a incluir `daily`.
+- **`models/refunds.js`:** `canClaimDailyRefund(userId)` repuesta y MEJORADA: decide por día **ART**
+  (helper `_artDateStr`), no por `toDateString()` del server (que en AWS corre en UTC y desfasaba
+  3 h). Reclamado = existe claim con `periodKey daily:<ayer>` **o** un claim de hoy ART (cubre filas
+  históricas sin periodKey). `nextClaim` = mañana 00:00 ART; `nextClaimAfterClaim` para que la PWA
+  arranque el contador tras reclamar.
+- **`notificationRulesService.js`:** seeds B1/B2 (push del diario 14:00 y 22:00) repuestos con copy
+  de rangos (sin % fijo). Se siembran DESACTIVADOS (`_seedDisabledAudiences`) y hoy son inertes
+  (DailyPlayerStats no portado) — no mandan nada solos.
+- **PWA:** botón `#dailyRefundBtn` de vuelta en el recuadro sticky de reembolsos (verde, clase
+  `.refund-btn.daily` repuesta en header.css), opción "📅 Reembolso Diario" en el modal unificado
+  (`#unifiedDailyPct`), cards "Reembolso Diario" en infoModal y adServiceModal, copy del welcome;
+  `refunds.js`: `updateRefundButton('daily')`, tooltip/%, modal con título/período de AYER,
+  estado "ya reclamado" con contador hasta `nextClaim` del server (00:00 ART), badge y panel de
+  rango muestran "X% diario · Y%" solo si difieren (con defaults iguales se ve "10%" como hoy).
+  **`?v=52` en index.html + `CACHE_VERSION` v52** (HTML y JS cambian juntos — regla #97).
+- **Panel:** card "Rangos de reembolso" reorganizada en 3 filas (una por rango) con "Sem/Mes %" y
+  "Diario %"; `loadRefundTiers`/`saveRefundTiers` mandan/leen los 3 campos nuevos; card de
+  reportes "📅 Diarios" sin el "(descontinuado)". `admin-sw.js` v25 → **v26**.
+- **Trade-offs (documentados, no bugs):** diario + semanal + mensual SIGUEN sin descontarse entre
+  sí (solape preexistente de #73: la misma pérdida puede reembolsarse 3 veces, hasta 30% en oro con
+  los defaults). El status hace 4 consultas a JUGAYGANA (antes 3). Los reclamos `daily` históricos
+  (pre 2026-07-28) siguen visibles en reportes.
+- **Revisión adversarial (agente, plata/contrato/stale clients): 0 ALTA.** Corregido: (a) la
+  audiencia push `refund-pending-daily` filtraba "ya reclamó" por `periodKey` SIN el prefijo
+  `daily:` (nunca matcheaba → re-avisaría a quien ya cobró; hoy inerte) y comparaba username en
+  lowercase contra el guardado tal cual → prefijo + regex anclado case-insensitive (la audiencia
+  semanal tiene el mismo desfase `YYYY-Www` vs `weekly:YYYY-MM-DD` — PENDIENTE, inerte);
+  (b) las reglas B1/B2 que ya existían en DB conservaban el copy "8%" (el seed no pisa existentes)
+  → la migración las reescribe SOLO si siguen con el copy de fábrica viejo (siguen apagadas);
+  (c) rama E11000 del claim devolvía `nextClaim:null` → ahora mañana 00:00 ART; (d) `dailyPercent`
+  en 0 decía "tu pérdida es muy chica" → mensaje claro "no está activo para tu rango"; (e)
+  `startCountdown` (PWA) comparaba el ISO del server contra `getArgentinaDate()` (fecha
+  desplazada) → `new Date()` (afecta también semanal/mensual; idéntico para navegadores en ART).
+  Riesgo inherente anotado, no nuevo: si `creditUserBalance` devuelve falso-fallo (HTML de
+  Cloudflare) con el crédito hecho, el `deleteOne` libera el período y un reintento paga doble —
+  el diario multiplica ×7 la exposición del semanal; mismo patrón que ya corre en producción.
+- **Validado:** `node --check` OK en todo lo tocado (server.js, models/refunds.js,
+  notificationRulesService.js, refunds.js, app.js, admin.js, ambos SW). Sin cambios de modelo (el
+  enum `RefundClaim.type` siempre tuvo `daily` y el índice único ya existía). **Back necesita
+  redeploy** (corre la migración de comandos). **PROBAR tras deploy:** abrir la PWA → recuadro de
+  reembolsos con 3 botones (Diario/Semanal/Mensual) y badge de rango; reclamar el diario (acredita
+  el % diario del rango sobre lo perdido ayer, y el segundo intento del día dice "Volvé mañana" con
+  contador); panel → COMANDOS → Rangos: se ven y guardan los 3 "Diario %"; revisar COMANDOS que
+  `/sys_welcome` y `/sys_deposit*` digan "DIARIO"; sección Reembolsos del panel con card Diarios.
 
 ## Sesión 2026-08-28
 

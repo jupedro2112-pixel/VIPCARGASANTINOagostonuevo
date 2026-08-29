@@ -32,8 +32,9 @@ El sistema VIPCARGAS:
 - Gestiona **cargas** (manuales por agente, o AUTOMÁTICAS vía banco hgcash + IA de
   comprobantes) y **retiros** (self-service con confirmación de agente y pago
   automático por hgcash).
-- Da **reembolsos** sobre la pérdida real/NETWIN (semanal/mensual, % según **rango**
-  🥉🥈🥇 por pérdida del mes; el diario fue eliminado 2026-07-28), **ruleta diaria**,
+- Da **reembolsos** sobre la pérdida real/NETWIN (diario/semanal/mensual, % según
+  **rango** 🥉🥈🥇 por pérdida del mes; el diario se eliminó 2026-07-28 y VOLVIÓ
+  2026-08-29 con su propio % por rango), **ruleta diaria**,
   **fueguito** (racha), **bono instalación** (cupón 100% próxima carga; antes $5.000),
   **referidos** (7% del owner-revenue) y **campañas/publicistas** con sub-atribución
   por influencer.
@@ -235,18 +236,23 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   devolver; si se descontó → devolución (split bonus/fichas para pagos legacy).
   `pay-other-bank` = pago manual (descuenta igual). Poller `_pollPayingPayouts` cada
   45s (últimas 2h) cubre webhooks perdidos.
-- **Reembolsos** (rediseñados 2026-07-28, ver #97): SOLO semanal y mensual — el
-  DIARIO fue eliminado (`claim/daily` quedó como stub amigable para PWAs cacheadas).
-  `POST /api/refunds/claim/{weekly|monthly}` — lock Redis, ventanas de
-  `models/refunds.js` (semanal: lunes/martes; mensual: desde día 7), NETWIN real de
+- **Reembolsos** (rediseñados 2026-07-28 #97; diario repuesto 2026-08-29 #101):
+  DIARIO, semanal y mensual. `POST /api/refunds/claim/{daily|weekly|monthly}` —
+  lock Redis, ventanas de `models/refunds.js` (diario: 1 por día ART, reembolsa AYER,
+  `canClaimDailyRefund` decide por `periodKey daily:YYYY-MM-DD` + claim de hoy ART;
+  semanal: lunes/martes; mensual: desde día 7), NETWIN real de
   `referralRevenueService.getUserNetwinForDateRange`. El **% sale del RANGO** del
-  cliente (`Config['refundTiers']`, editable panel→COMANDOS, solo admin general;
-  defaults: 🥉 bronce hasta $30.000 = 3%, 🥈 plata hasta $100.000 = 5%, 🥇 oro = 10%),
-  calculado sobre la pérdida NETWIN mensual: el MENSUAL usa el netwin del propio mes
-  reembolsado; el SEMANAL usa el mes al que pertenece el LUNES de la semana (mes en
-  curso a hoy, o el mes anterior completo si la semana arrancó allá — decidir por el
-  domingo era un bug de arranque de mes). `GET /api/refunds/status` devuelve además
-  `tier` (rango en vivo del mes en curso + nextTier + tabla) y un `daily` stub inerte.
+  cliente (`Config['refundTiers']`, editable panel→COMANDOS, solo admin general): cada
+  rango tiene `percent` (semanal/mensual) y `dailyPercent` (diario); defaults 🥉 bronce
+  hasta $30.000 = 3%/3%, 🥈 plata hasta $100.000 = 5%/5%, 🥇 oro = 10%/10% (config
+  guardada sin `dailyPercent` cae al default). El rango se calcula sobre la pérdida
+  NETWIN mensual: el MENSUAL usa el netwin del propio mes reembolsado; SEMANAL y DIARIO
+  usan el mes al que pertenece el INICIO del período (lunes de la semana / el día de
+  ayer) — helper `refundTierRangeForPeriodStart`: mes en curso a hoy, o el mes anterior
+  completo si el período arrancó allá (decidir por el fin del período era un bug de
+  arranque de mes). `GET /api/refunds/status` devuelve `tier` (rango en vivo del mes
+  en curso + `percentage` + `dailyPercentage` + nextTier + tabla con ambos %) y
+  `daily/weekly/monthly` con `percentage`, `tier`, `potentialAmount`, `nextClaim`.
   Guard `refundAmount <= 0` ANTES de reservar (no quemar el período por $0).
   **El RefundClaim se CREA antes de acreditar** (el índice único `userId+type+periodKey`
   es el candado atómico contra doble cobro; si el crédito falla se borra la reserva;
@@ -279,7 +285,7 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   auth, socket, chat, ui, refunds, fire, roulette, reviews, promobonus, notifications,
   withdraw, installbonus, notifsurvey, publisherwelcome, campaign, meta-pixel, apptest,
   app). El orden real de carga está en index.html (el comentario de app.js está viejo).
-- **SW único**: `firebase-messaging-sw.js` (CACHE_VERSION v51) — FCM + caché:
+- **SW único**: `firebase-messaging-sw.js` (CACHE_VERSION v52) — FCM + caché:
   `/js/` y `/css/` stale-while-revalidate (deploy llega en la SIGUIENTE carga sin
   bumpear versión), `/app.js` y manifest network-first, API/socket nunca. `user-sw.js`
   es un stub de auto-desregistro (no volver a registrarlo).
@@ -287,7 +293,7 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   deploy que cambia HTML y JS JUNTOS corre UNA carga con HTML nuevo + JS viejo del
   caché SWR (TypeError si el HTML cambió el DOM — casi pasó con el botón del
   reembolso diario). Al cambiar HTML+JS juntos: bumpear `?v` y CACHE_VERSION al
-  mismo número. Cambios de JS solo (sin DOM nuevo) siguen sin necesitar bump.
+  mismo número (hoy v52). Cambios de JS solo (sin DOM nuevo) siguen sin necesitar bump.
 - **FCM**: todo el manejo real (getToken 3 tiers, refresh, register-token) está en el
   INLINE de index.html; `window.sendFcmTokenAfterLogin` del inline pisa a propósito la
   de notifications.js. Firebase config duplicada en index.html Y en el SW (cambiar
@@ -313,7 +319,7 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   fueguito 30%, tags/notas, payout pendiente con botones pay/other-bank/cancel/
   dismiss/sync, promo bonus). Races protegidas por `activeConversationId` +
   AbortController — **no romper ese patrón**.
-- `admin-sw.js` (v25, scope /adminprivado2026/): network-first no-store para el shell.
+- `admin-sw.js` (v26, scope /adminprivado2026/): network-first no-store para el shell.
   Bumpear `CACHE_VERSION` en cada cambio de admin.js/admin.css.
 - Mensajes `type:'system'` en el chat del panel (`createMessageElement`): `adminOnly:true`
   → VERDE + badge "🔒 INTERNO — el cliente NO lo ve" (el cliente nunca lo recibió);
@@ -329,7 +335,7 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
 
 | Motor | Frecuencia | Estado | Idempotencia |
 |---|---|---|---|
-| `_runNotifRulesEvaluator` (reglas push) | 5 min | activo (reglas refund/tier inertes: PlayerStats no portado) | lastFiredAt + ventana |
+| `_runNotifRulesEvaluator` (reglas push) | 5 min | activo (reglas refund B1-B6/tier inertes: PlayerStats no portado; se siembran apagadas) | lastFiredAt + ventana |
 | `_runEncuestaTick` | 5 min | pushes sí, **bonos apagados** (`bDays=[]`) | EncuestaFire.slotKey único |
 | `_runInactividadTick` | 6 h | **APAGADO** (`INACTIVIDAD_DISABLED=true`) | InactividadFire.fireKey único |
 | `_runBonusStrategy` | 10 min | **APAGADO** (`BONUS_STRATEGY_DISABLED=true`) | step en StrategyEnrollment |
@@ -351,9 +357,8 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   reemplaza `{amount}` (el `$` queda como signo); texto como `{username}` sin `$`.
 - **Identidad**: `user.id` (uuid), no `_id`. Username case-insensitive →
   `findUserByUsernameCI` (indexado + fallback), NUNCA regex nuevo.
-- **periodKey**: `YYYY-MM` (referidos); RefundClaim usa `weekly:YYYY-MM-DD` /
-  `monthly:YYYY-MM` (`daily:YYYY-MM-DD` solo en filas históricas — el diario se
-  eliminó 2026-07-28).
+- **periodKey**: `YYYY-MM` (referidos); RefundClaim usa `daily:YYYY-MM-DD` (día ART
+  reembolsado = ayer) / `weekly:YYYY-MM-DD` (lunes) / `monthly:YYYY-MM`.
 - **Montos JUGAYGANA**: centavos (×100) al enviar; balances vuelven /100.
 - **Todo lo fire-and-forget** (tracking, comprobantes, fanout, SLA) va en try/catch y
   JAMÁS frena la respuesta al cliente — mantener ese patrón.

@@ -350,7 +350,9 @@ function setupEventListeners() {
         const fileInput = document.getElementById('fileInput');
         if (fileInput) fileInput.addEventListener('change', VIP.chat.handleFileSelect);
 
-        // Refund buttons (el diario fue eliminado 2026-07-28 — rangos 🥉🥈🥇)
+        // Refund buttons (diario/semanal/mensual — % según rango 🥉🥈🥇; el diario volvió 2026-08-29)
+        const dailyRefundBtn = document.getElementById('dailyRefundBtn');
+        if (dailyRefundBtn) dailyRefundBtn.addEventListener('click', () => VIP.refunds.showRefundModal('daily'));
         const weeklyRefundBtn = document.getElementById('weeklyRefundBtn');
         if (weeklyRefundBtn) weeklyRefundBtn.addEventListener('click', () => VIP.refunds.showRefundModal('weekly'));
         const monthlyRefundBtn = document.getElementById('monthlyRefundBtn');

@@ -104,12 +104,17 @@ async function _resolveAudience(rule, models) {
       const losersNorm = losses.map(d => (d.username || '').toLowerCase());
       if (losersNorm.length === 0) return [];
 
-      // Excluir los que ya reclamaron daily para ese periodKey.
-      const periodKey = yest.dateKeyArt;
+      // Excluir los que ya reclamaron daily para ese periodKey. El claim guarda
+      // 'daily:YYYY-MM-DD' (server.js, reembolso diario) — sin el prefijo NUNCA
+      // matcheaba y se re-avisaba a quien ya cobró (fix 2026-08-29).
+      // ⚠️ RefundClaim.username se guarda tal cual (no lowercase): se compara
+      // case-insensitive por regex anclado.
+      const periodKey = 'daily:' + yest.dateKeyArt;
+      const _escRe = (t) => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const claimed = await RefundClaim.find({
         type: 'daily',
         periodKey,
-        username: { $in: losersNorm }
+        username: { $in: losersNorm.map(u => new RegExp('^' + _escRe(u) + '$', 'i')) }
       }).select('username').lean();
       const claimedSet = new Set(claimed.map(c => (c.username || '').toLowerCase()));
 
@@ -520,10 +525,41 @@ async function evaluateAllRules({ models, sendPushFn, logger }) {
 async function seedDefaultRulesIfMissing(NotificationRule) {
   const defaults = [
     // ============= REEMBOLSOS =============
-    // B1/B2 (recordatorios del reembolso DIARIO) eliminados 2026-07-28: el
-    // reembolso diario no existe más (sistema de rangos bronce/plata/oro en
-    // semanal/mensual). La migración refund_tiers_install100 desactiva las
-    // reglas refund-pending-daily que ya estén en la DB.
+    // B1/B2 (recordatorios del reembolso DIARIO): eliminados 2026-07-28 y
+    // REPUESTOS 2026-08-29 al volver el diario. Se siembran DESACTIVADOS (ver
+    // _seedDisabledAudiences) y hoy son inertes (DailyPlayerStats no portado);
+    // si el owner las activa y algún día se porta ese subsistema, el copy ya
+    // habla de rangos (sin % fijo).
+    {
+      id: uuidv4(),
+      code: 'B1',
+      name: 'Recordatorio reembolso diario — tarde (14:00)',
+      description: 'Push al mediodía a quienes perdieron ayer y no reclamaron todavía.',
+      category: 'refund',
+      enabled: true,
+      triggerType: 'cron',
+      cronSchedule: { hour: 14, minute: 0 },
+      audienceType: 'refund-pending-daily',
+      title: '💰 Tu reembolso diario te espera',
+      body: '¿Perdiste ayer? Tenés un reembolso disponible según tu rango 🥉🥈🥇. Tocá para reclamarlo.',
+      bonus: { type: 'none' },
+      cooldownMinutes: 12 * 60
+    },
+    {
+      id: uuidv4(),
+      code: 'B2',
+      name: 'Recordatorio reembolso diario — última hora (22:00)',
+      description: 'Último aviso 2h antes del cierre del día ART.',
+      category: 'refund',
+      enabled: true,
+      triggerType: 'cron',
+      cronSchedule: { hour: 22, minute: 0 },
+      audienceType: 'refund-pending-daily',
+      title: '⏰ Última hora para tu reembolso diario',
+      body: 'Quedan 2 horas. No te pierdas el reembolso de lo que perdiste ayer.',
+      bonus: { type: 'none' },
+      cooldownMinutes: 8 * 60
+    },
     {
       id: uuidv4(),
       code: 'B3',

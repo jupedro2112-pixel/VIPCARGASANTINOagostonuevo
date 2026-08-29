@@ -22,8 +22,9 @@ VIP.refunds = (function () {
 
     function updateRefundButtons() {
         if (!VIP.state.refundStatus) return;
-        // El reembolso diario fue eliminado (2026-07-28): solo semanal y mensual,
-        // con % según el RANGO del mes (bronce/plata/oro).
+        // Diario (repuesto 2026-08-29), semanal y mensual, con % según el RANGO
+        // del mes (bronce/plata/oro). El diario tiene su propio % por rango.
+        updateRefundButton('daily', VIP.state.refundStatus.daily);
         updateRefundButton('weekly', VIP.state.refundStatus.weekly);
         updateRefundButton('monthly', VIP.state.refundStatus.monthly);
         updateRefundLabels();
@@ -39,12 +40,14 @@ VIP.refunds = (function () {
             const el = document.getElementById(id);
             if (el && s[t] && s[t].percentage != null) el.title = `${label} ${s[t].percentage}%`;
         };
+        tip('dailyRefundBtn', 'Reembolso Diario (de lo perdido ayer)', 'daily');
         tip('weeklyRefundBtn', 'Reembolso Semanal (Lun-Mar)', 'weekly');
         tip('monthlyRefundBtn', 'Reembolso Mensual (Desde día 7)', 'monthly');
         const pctSpan = (id, t) => {
             const el = document.getElementById(id);
             if (el && s[t] && s[t].percentage != null) el.textContent = s[t].percentage;
         };
+        pctSpan('unifiedDailyPct', 'daily');
         pctSpan('unifiedWeeklyPct', 'weekly');
         pctSpan('unifiedMonthlyPct', 'monthly');
     }
@@ -58,7 +61,9 @@ VIP.refunds = (function () {
         const badge = document.getElementById('dashTierBadge');
         if (badge) {
             badge.style.display = '';
-            badge.textContent = `TU RANGO: ${t.emoji || ''} ${(t.label || t.key).toUpperCase()} · ${t.percentage}%`;
+            const dp = t.dailyPercentage;
+            const pctTxt = (dp != null && dp !== t.percentage) ? `${dp}% diario · ${t.percentage}%` : `${t.percentage}%`;
+            badge.textContent = `TU RANGO: ${t.emoji || ''} ${(t.label || t.key).toUpperCase()} · ${pctTxt}`;
         }
 
         const panel = document.getElementById('unifiedTierPanel');
@@ -68,17 +73,17 @@ VIP.refunds = (function () {
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;border-radius:6px;${active ? 'background:rgba(212,175,55,.18);border:1px solid rgba(212,175,55,.6);' : 'opacity:.75;'}">
                     <span style="font-size:12px;color:#fff;">${tt.emoji} ${tt.label}</span>
                     <span style="font-size:11px;color:#aaa;">${tt.upTo ? 'hasta ' + money(tt.upTo) : 'más de ' + money((tiers.plata && tiers.plata.upTo) || 0)}</span>
-                    <span style="font-size:12px;font-weight:900;color:#ffd700;">${tt.percent}%</span>
+                    <span style="font-size:11px;font-weight:900;color:#ffd700;white-space:nowrap;">${tt.dailyPercent != null ? '📅 ' + tt.dailyPercent + '% · ' : ''}📆🗓️ ${tt.percent}%</span>
                 </div>` : '';
             const next = t.nextTier ? `
                 <p style="font-size:11px;color:#00ff88;text-align:center;margin:6px 0 0;">
-                    Te faltan <strong>${money(t.nextTier.missing)}</strong> de juego este mes para subir a ${t.nextTier.emoji} ${t.nextTier.label} (${t.nextTier.percent}%)
+                    Te faltan <strong>${money(t.nextTier.missing)}</strong> de juego este mes para subir a ${t.nextTier.emoji} ${t.nextTier.label} (${t.nextTier.dailyPercent != null && t.nextTier.dailyPercent !== t.nextTier.percent ? t.nextTier.dailyPercent + '% diario · ' : ''}${t.nextTier.percent}%)
                 </p>` : `
                 <p style="font-size:11px;color:#ffd700;text-align:center;margin:6px 0 0;">¡Estás en el rango máximo! 🏆</p>`;
             panel.style.display = 'block';
             panel.innerHTML = `
                 <div style="background:linear-gradient(135deg,#2d0052,#1a0033);border:1px solid #d4af37;border-radius:10px;padding:10px;margin-bottom:4px;">
-                    <p style="text-align:center;font-size:13px;font-weight:900;color:#ffd700;margin:0 0 2px;">TU RANGO DEL MES: ${t.emoji} ${(t.label || '').toUpperCase()} — ${t.percentage}%</p>
+                    <p style="text-align:center;font-size:13px;font-weight:900;color:#ffd700;margin:0 0 2px;">TU RANGO DEL MES: ${t.emoji} ${(t.label || '').toUpperCase()} — ${(t.dailyPercentage != null && t.dailyPercentage !== t.percentage) ? t.dailyPercentage + '% diario · ' : ''}${t.percentage}%</p>
                     <p style="text-align:center;font-size:10.5px;color:#aaa;margin:0 0 8px;">Se calcula con tu pérdida (NETWIN) del mes: ${money(t.monthNetLoss)}</p>
                     <div style="display:flex;flex-direction:column;gap:4px;">
                         ${row(tiers.bronce, t.key === 'bronce')}
@@ -86,7 +91,7 @@ VIP.refunds = (function () {
                         ${row(tiers.oro, t.key === 'oro')}
                     </div>
                     ${next}
-                    <p style="font-size:10px;color:#888;text-align:center;margin:6px 0 0;line-height:1.4;">El reembolso mensual usa el rango del mes que se reembolsa (el mes pasado); el semanal, el del mes de esa semana.</p>
+                    <p style="font-size:10px;color:#888;text-align:center;margin:6px 0 0;line-height:1.4;">📅 = % del diario · 📆🗓️ = % del semanal y mensual. El mensual usa el rango del mes que se reembolsa (el mes pasado); el semanal y el diario, el del mes al que pertenece ese período.</p>
                 </div>`;
         }
     }
@@ -119,7 +124,10 @@ VIP.refunds = (function () {
         const timerElement = document.getElementById(`${type}RefundTimer`);
 
         function update() {
-            const now    = getArgentinaDate();
+            // `nextClaim` es un instante real (ISO del server): se compara contra
+            // new Date(), NO contra getArgentinaDate() (fecha "desplazada" que
+            // corría el contador varias horas en navegadores fuera de ART).
+            const now    = new Date();
             const target = new Date(targetDate);
             const diff   = target - now;
 
@@ -145,8 +153,7 @@ VIP.refunds = (function () {
     }
 
     async function showRefundModal(type) {
-        // Solo semanal y mensual (el diario fue eliminado 2026-07-28).
-        if (type !== 'weekly' && type !== 'monthly') return;
+        if (type !== 'daily' && type !== 'weekly' && type !== 'monthly') return;
 
         if (!VIP.state.refundStatus) {
             VIP.ui.showToast('Cargando información de reembolsos...', 'info');
@@ -165,10 +172,12 @@ VIP.refunds = (function () {
             return (p !== undefined && p !== null) ? p : 3;
         };
         const titles = {
+            daily:   `📅 Reembolso Diario (${pctOf('daily')}%)`,
             weekly:  `📆 Reembolso Semanal (${pctOf('weekly')}%)`,
             monthly: `🗓️ Reembolso Mensual (${pctOf('monthly')}%)`
         };
         const periodLabels = {
+            daily:   '🎮 TU NETWIN DE AYER (pérdida real jugando)',
             weekly:  '🎮 TU NETWIN DE LA SEMANA PASADA (Lun-Dom)',
             monthly: '🎮 TU NETWIN DEL MES PASADO'
         };
@@ -229,7 +238,16 @@ VIP.refunds = (function () {
         let isClaimed     = false;
         let timeRemaining = '';
 
-        if (typeData.lastClaim) {
+        if (type === 'daily' && !typeData.canClaim && typeData.nextClaim) {
+            // El server decide por día ART (mañana 00:00 ART); el cliente solo cuenta.
+            const diff = new Date(typeData.nextClaim) - new Date();
+            if (diff > 0) {
+                isClaimed = true;
+                const hours   = Math.floor(diff / (1000 * 60 * 60));
+                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                timeRemaining = `${hours}h ${minutes}m`;
+            }
+        } else if (typeData.lastClaim) {
             const lastClaim = new Date(typeData.lastClaim);
             const now = new Date();
 
@@ -308,7 +326,8 @@ VIP.refunds = (function () {
                 VIP.ui.showToast(`✅ ${data.message}`, 'success');
                 VIP.ui.hideModal('refundModal');
                 loadRefundStatus();
-                VIP.chat.sendSystemMessage(`🎁 Reembolso ${type} reclamado: $${data.amount.toLocaleString()}`);
+                const typeLabel = { daily: 'diario', weekly: 'semanal', monthly: 'mensual' }[type] || type;
+                VIP.chat.sendSystemMessage(`🎁 Reembolso ${typeLabel} reclamado: $${data.amount.toLocaleString()}`);
 
                 // Meta Pixel — RefundClaim (custom, deduplicado con CAPI).
                 if (VIP.pixel) VIP.pixel.trackWithId(metaEventId, 'RefundClaim', {

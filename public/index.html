@@ -207,12 +207,12 @@
     <noscript><img height="1" width="1" style="display:none"
         src="https://www.facebook.com/tr?id=__META_PIXEL_ID_PLACEHOLDER__&ev=PageView&noscript=1"/></noscript>
 
-    <link rel="stylesheet" href="/css/base.css?v=51">
-    <link rel="stylesheet" href="/css/login.css?v=51">
-    <link rel="stylesheet" href="/css/header.css?v=51">
-    <link rel="stylesheet" href="/css/chat.css?v=51">
-    <link rel="stylesheet" href="/css/modals.css?v=51">
-    <link rel="stylesheet" href="/css/responsive.css?v=51">
+    <link rel="stylesheet" href="/css/base.css?v=52">
+    <link rel="stylesheet" href="/css/login.css?v=52">
+    <link rel="stylesheet" href="/css/header.css?v=52">
+    <link rel="stylesheet" href="/css/chat.css?v=52">
+    <link rel="stylesheet" href="/css/modals.css?v=52">
+    <link rel="stylesheet" href="/css/responsive.css?v=52">
     <style>
         /* In-app notification banner (foreground PWA) */
         .in-app-notification-banner {
@@ -660,6 +660,13 @@
                             <button id="dashTierBadge" onclick="VIP.refunds.showUnifiedRefundModal()" style="display:none; min-width:0; max-width:70%; background:linear-gradient(135deg,#2d0052,#1a0033); color:#ffd700; border:1px solid #d4af37; border-radius:999px; padding:3px 10px; font-size:10px; font-weight:900; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></button>
                         </div>
                         <div class="dash-refunds-row">
+                            <!-- Diario repuesto 2026-08-29 (lo pinta js/refunds.js con el estado real) -->
+                            <button id="dailyRefundBtn" class="refund-btn daily" title="Reembolso Diario (de lo perdido ayer)">
+                                <span class="refund-label-full">📅<br>Diario</span>
+                                <span class="refund-label-short">📅</span>
+                                <span class="refund-amount" id="dailyRefundAmount">$0</span>
+                                <span class="refund-timer" id="dailyRefundTimer"></span>
+                            </button>
                             <button id="weeklyRefundBtn" class="refund-btn weekly" title="Reembolso Semanal (Lun-Mar)">
                                 <span class="refund-label-full">📆<br>Semanal</span>
                                 <span class="refund-label-short">📆</span>
@@ -1267,6 +1274,9 @@
             <!-- Panel de rango (bronce/plata/oro): lo pinta js/refunds.js con el estado real. -->
             <div id="unifiedTierPanel" style="display:none;"></div>
             <div style="display:flex;flex-direction:column;gap:12px;padding:10px 0;">
+                <button onclick="VIP.refunds.showRefundModal('daily');VIP.ui.hideModal('unifiedRefundModal');" class="btn btn-primary" style="font-size:15px;padding:14px;">
+                    📅 Reembolso Diario (<span id="unifiedDailyPct">3</span>% de tu NETWIN de ayer)
+                </button>
                 <button onclick="VIP.refunds.showRefundModal('weekly');VIP.ui.hideModal('unifiedRefundModal');" class="btn btn-primary" style="font-size:15px;padding:14px;background:linear-gradient(135deg,#1a6b3a,#2d9b56);">
                     📆 Reembolso Semanal (<span id="unifiedWeeklyPct">3</span>% de tu NETWIN semanal)
                 </button>
@@ -1314,7 +1324,7 @@
                     <span id="refundAmount" style="color: #ffd700; font-size: 20px; font-weight: bold;">$0</span>
                 </div>
                 
-                <!-- Info de disponibilidad (solo para semanal y mensual) -->
+                <!-- Info de disponibilidad (semanal y mensual tienen ventana; el diario es todos los días) -->
                 <div id="refundAvailabilityInfo" style="margin-top: 10px; padding: 10px; border-radius: 8px; display: none;"></div>
                 
                 <!-- Info adicional -->
@@ -1400,6 +1410,11 @@
                     <div class="info-card-desc">Tu % de reembolso según lo que perdés en el mes: Bronce 3%, Plata 5%, Oro 10%.</div>
                 </div>
                 <div class="info-card">
+                    <div class="info-card-icon">💰</div>
+                    <div class="info-card-title">Reembolso Diario</div>
+                    <div class="info-card-desc">El % de tu rango sobre tus pérdidas de ayer, todos los días.</div>
+                </div>
+                <div class="info-card">
                     <div class="info-card-icon">📅</div>
                     <div class="info-card-title">Reembolso Semanal</div>
                     <div class="info-card-desc">El % de tu rango sobre tus pérdidas de la semana (lunes y martes).</div>
@@ -1452,6 +1467,11 @@
                     <div style="font-size:22px; line-height:1;">🏅</div>
                     <div style="color:#00ff88; font-weight:700; font-size:11px; margin:3px 0 2px;">Rangos 🥉🥈🥇</div>
                     <div style="color:#b0b0b0; font-size:9.5px; line-height:1.3;">Bronce 3% · Plata 5% · Oro 10% según tu mes.</div>
+                </div>
+                <div style="background:linear-gradient(135deg,rgba(0,255,136,0.10),rgba(0,204,106,0.10)); border:1px solid rgba(0,255,136,0.55); border-radius:9px; padding:8px 6px; text-align:center;">
+                    <div style="font-size:22px; line-height:1;">💰</div>
+                    <div style="color:#00ff88; font-weight:700; font-size:11px; margin:3px 0 2px;">Reembolso Diario</div>
+                    <div style="color:#b0b0b0; font-size:9.5px; line-height:1.3;">El % de tu rango sobre lo de ayer, todos los días.</div>
                 </div>
                 <div style="background:linear-gradient(135deg,rgba(0,255,136,0.10),rgba(0,204,106,0.10)); border:1px solid rgba(0,255,136,0.55); border-radius:9px; padding:8px 6px; text-align:center;">
                     <div style="font-size:22px; line-height:1;">📅</div>
@@ -1602,7 +1622,7 @@
                     <li style="display:flex; align-items:flex-start; gap:8px;"><span style="color:#00ff88;">✓</span><span>Retiros al instante 24/7</span></li>
                     <li style="display:flex; align-items:flex-start; gap:8px;"><span style="color:#00ff88;">✓</span><span>Sin límite de retiros</span></li>
                     <li style="display:flex; align-items:flex-start; gap:8px;"><span style="color:#00ff88;">✓</span><span>Racha diaria reclamable</span></li>
-                    <li style="display:flex; align-items:flex-start; gap:8px;"><span style="color:#00ff88;">✓</span><span>Reembolsos semanales y mensuales según tu rango 🥉🥈🥇</span></li>
+                    <li style="display:flex; align-items:flex-start; gap:8px;"><span style="color:#00ff88;">✓</span><span>Reembolsos diarios, semanales y mensuales según tu rango 🥉🥈🥇</span></li>
                     <li style="display:flex; align-items:flex-start; gap:8px;"><span style="color:#00ff88;">✓</span><span>Premios, bonificaciones y más</span></li>
                 </ul>
 
@@ -1850,25 +1870,25 @@
          /css/, así que sin la query un deploy corre UNA carga con HTML nuevo + JS
          viejo cacheado (TypeError si el HTML cambió el DOM). Al cambiar HTML y JS
          JUNTOS, bumpear ?v acá y CACHE_VERSION del SW al mismo número. -->
-    <script src="/js/config.js?v=51"></script>
-    <script src="/js/campaign.js?v=51"></script>
-    <script src="/js/meta-pixel.js?v=51"></script>
-    <script src="/js/auth.js?v=51"></script>
-    <script src="/js/socket.js?v=51"></script>
-    <script src="/js/chat.js?v=51"></script>
-    <script src="/js/refunds.js?v=51"></script>
-    <script src="/js/fire.js?v=51"></script>
-    <script src="/js/roulette.js?v=51"></script>
-    <script src="/js/reviews.js?v=51"></script>
-    <script src="/js/promobonus.js?v=51"></script>
-    <script src="/js/notifications.js?v=51"></script>
-    <script src="/js/ui.js?v=51"></script>
-    <script src="/js/withdraw.js?v=51"></script>
-    <script src="/js/installbonus.js?v=51"></script>
-    <script src="/js/notifsurvey.js?v=51"></script>
-    <script src="/js/publisherwelcome.js?v=51"></script>
-    <script src="/js/apptest.js?v=51"></script>
-    <script src="/js/app.js?v=51"></script>
+    <script src="/js/config.js?v=52"></script>
+    <script src="/js/campaign.js?v=52"></script>
+    <script src="/js/meta-pixel.js?v=52"></script>
+    <script src="/js/auth.js?v=52"></script>
+    <script src="/js/socket.js?v=52"></script>
+    <script src="/js/chat.js?v=52"></script>
+    <script src="/js/refunds.js?v=52"></script>
+    <script src="/js/fire.js?v=52"></script>
+    <script src="/js/roulette.js?v=52"></script>
+    <script src="/js/reviews.js?v=52"></script>
+    <script src="/js/promobonus.js?v=52"></script>
+    <script src="/js/notifications.js?v=52"></script>
+    <script src="/js/ui.js?v=52"></script>
+    <script src="/js/withdraw.js?v=52"></script>
+    <script src="/js/installbonus.js?v=52"></script>
+    <script src="/js/notifsurvey.js?v=52"></script>
+    <script src="/js/publisherwelcome.js?v=52"></script>
+    <script src="/js/apptest.js?v=52"></script>
+    <script src="/js/app.js?v=52"></script>
     
     <!-- ============================================
          FIREBASE CLOUD MESSAGING & PWA
