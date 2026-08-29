@@ -80,6 +80,11 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   (exportado por `jugaygana.js`) antes de concatenar/loguear, o sale `[object Object]`.
   Para decidir "existe / no existe" usar `lookupUserOrError` (tri-estado), nunca
   `getUserInfoByName` (colapsa "falló la API" con "no existe").
+- **Fechas a JUGAYGANA (`royalty-statistics` = NETWIN de reembolsos y referidos):** el
+  período es el día calendario ARGENTINO (`D 00:00:00-03:00` → `D 23:59:59-03:00`) y se
+  manda SIEMPRE como **epoch en segundos** (`referralRevenueService` lo fuerza). Nunca
+  fecha en texto ni `new Date(y, m, d)` (hora del server = UTC → ventana corrida 3 h).
+  Rangos: helpers `get*RangeArgentinaEpoch` de `jugaygana.js`.
 - **Bonos automáticos APAGADOS por flags** (owner 2026-06-24): `INACTIVIDAD_DISABLED`
   y `BONUS_STRATEGY_DISABLED` (server.js) + `CHARGE_BONUSES_DISABLED`
   (notificationRulesService) + bonos de encuesta con `bDays=[]`. Tope 30% en TODO lo

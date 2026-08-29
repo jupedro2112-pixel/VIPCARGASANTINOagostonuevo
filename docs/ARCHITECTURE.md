@@ -169,7 +169,13 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
 Además `src/services/referralRevenueService.js` consulta `royalty-statistics`
 (**header `X-Token`**, no Bearer) con **`child_user_id` OBLIGATORIO** (sin él devuelve
 el agregado GLOBAL del agente → números inflados). Es la fuente del NETWIN de
-reembolsos Y del revenue de referidos. `jugayganaUserLinkService.resolveJugayganaUserId`
+reembolsos Y del revenue de referidos. **Fechas SIEMPRE como epoch en segundos** de
+instantes ART (`D 00:00:00-03:00` → `D 23:59:59-03:00`; ej. 28/08/2026 = 1787886000 →
+1787972399): texto `YYYY-MM-DD` u hora sin zona JUGAYGANA lo lee como UTC con fin
+excluido → ventana corrida 3 h (bug hasta 2026-08-29, ver WORKLOG #102). Los rangos
+salen de `jugaygana.js` (`getYesterdayRange…`, `getLastWeekRange…`, `getLastMonthRange…`,
+`getCurrentMonthToDate…`, `getMonthToDateRangeForDate…`) y de `utils/periodKey.getPeriodRange`
+(referidos, mes ART). `jugayganaUserLinkService.resolveJugayganaUserId`
 hace backfill al vuelo del id faltante.
 
 **Comportamiento clave:** JUGAYGANA es flaky — responde HTML (Cloudflare) de forma
@@ -360,6 +366,9 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
 - **periodKey**: `YYYY-MM` (referidos); RefundClaim usa `daily:YYYY-MM-DD` (día ART
   reembolsado = ayer) / `weekly:YYYY-MM-DD` (lunes) / `monthly:YYYY-MM`.
 - **Montos JUGAYGANA**: centavos (×100) al enviar; balances vuelven /100.
+- **Fechas a `royalty-statistics`**: epoch en SEGUNDOS de instantes ART (día calendario
+  argentino 00:00:00 → 23:59:59 -03:00), nunca texto. Rangos nuevos: construirlos con
+  `new Date('YYYY-MM-DDT00:00:00-03:00')`, jamás con `new Date(y, m, d)` (hora del server = UTC).
 - **Todo lo fire-and-forget** (tracking, comprobantes, fanout, SLA) va en try/catch y
   JAMÁS frena la respuesta al cliente — mantener ese patrón.
 - **Crédito de plata al cliente = RESERVAR ATÓMICO ANTES de acreditar** (nunca acreditar
@@ -410,6 +419,8 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   HTML sin pasar por `renderIndexHtml`.
 - **Firebase config duplicada** (index.html + firebase-messaging-sw.js) y VAPID key en
   el inline: cambiar en ambos lados.
+- **Fechas a royalty-statistics en epoch segundos ART** (no texto): mandar `YYYY-MM-DD`
+  corre la ventana 3 h y le corta el pico nocturno al cliente (WORKLOG #102).
 - **`X-Token` en royalty-statistics** y **`child_user_id` obligatorio** — cambiarlos
   rompe referidos Y reembolsos.
 - **`_communityRecommendCard` (roulette.js)**: feature pedida por el owner que nunca
