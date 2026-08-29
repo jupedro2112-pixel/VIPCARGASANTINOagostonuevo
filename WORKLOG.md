@@ -8,6 +8,37 @@
 
 ## Sesión 2026-08-29
 
+### 102. FIX ventana de fechas a JUGAYGANA: royalty-statistics SIEMPRE con epoch en segundos (día calendario ART)
+- **Regla del owner (verificada contra "Reportes globales" del panel de JUGAYGANA):** el día de
+  reembolso es el día calendario ARGENTINO — D 00:00:00-03:00 → D 23:59:59-03:00 — y a JUGAYGANA se
+  le pide con **epoch en segundos**, nunca fecha en texto. Ej. 28/08/2026: `date_from=1787886000`,
+  `date_to=1787972399` (el código lo reproduce exacto: `Date.parse('2026-08-28T00:00:00-03:00')/1000`).
+  Mandar `"2026-08-28"` (o `"2026-08-28 00:00:00"` sin zona) JUGAYGANA lo lee como medianoche UTC
+  con fin excluido → ventana real 21:00 del día anterior → 21:00 de D (ART): le cortaba a los
+  clientes el pico nocturno (21–24 hs). Semanal y mensual: misma regla.
+- **Bug encontrado:** `referralRevenueService.formatRevenueDate` tenía default `"iso"` =
+  `toISOString().split('T')[0]` = **fecha en texto en UTC**. Los rangos (`getYesterdayRange…`,
+  `getLastWeekRange…`, `getLastMonthRange…`, `getCurrentMonthToDate…`, `getMonthToDateRangeForDate…`
+  en `jugaygana.js`) YA eran instantes ART correctos; el defecto era solo el formateo del body: el
+  `to` (23:59:59-03:00 = 02:59:59 UTC del día siguiente) salía como D+1 y JUGAYGANA corría todo 3 h.
+  Aplicaba a los 3 reembolsos, al cálculo del rango y al revenue de referidos. (La env
+  `JUGAYGANA_REVENUE_DATE_FORMAT=epoch_s` lo hubiera corregido, pero se lee al `require()` — antes
+  del bootstrap SSM — y no consta que estuviera seteada como env property de EB.)
+- **Fix 1 (`src/services/referralRevenueService.js`):** `REVENUE_DATE_FORMAT` fijado en `'epoch_s'`;
+  `formatRevenueDate` devuelve SIEMPRE epoch en segundos; los formatos `iso`/`epoch_ms` quedan
+  eliminados y la env var se ignora con warning en el log.
+- **Fix 2 (`src/utils/periodKey.js` `getPeriodRange`, referidos):** el mes `YYYY-MM` se construía
+  con `new Date(y, m-1, 1)` = hora LOCAL del server (UTC en AWS) → el período de comisiones de
+  referidos arrancaba a las 21:00 ART del día anterior. Ahora `01T00:00:00-03:00` →
+  `<último día>T23:59:59-03:00` (probado: 2026-08 → 1785553200 / 1788231599). Único consumidor real:
+  `getUserRevenueForPeriod` (referralController solo lo importa).
+- **Efecto esperado tras deploy:** el NETWIN diario/semanal/mensual y el rango pasan a coincidir con
+  el panel de JUGAYGANA para ese día/semana/mes (antes se perdían las 21–24 hs y se sumaban las del
+  día anterior). Buscar en logs `dateFormat=epoch_s` y `date_from=<epoch>` en las líneas
+  `[ReferralRevenue] POST royalty-statistics`.
+- **Validado:** `node --check` OK (referralRevenueService.js, periodKey.js); `getPeriodRange`
+  ejecutado en aislamiento. Back necesita redeploy. Regla nueva en CLAUDE.md y ARCHITECTURE §4.
+
 ### 101. REEMBOLSO DIARIO de vuelta — con % DIARIO propio por rango (🥉🥈🥇), editable en el panel
 - **Pedido del owner (con captura de un cliente preguntando "en la página se borró el reembolso
   diario"):** volver a implementar el reembolso DIARIO "con todo lo que conlleva", sobre el sistema

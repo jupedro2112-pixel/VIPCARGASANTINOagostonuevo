@@ -22,7 +22,10 @@
  *                                        El panel oficial usa "child_user_id" con el ID numérico del proveedor.
  *                                        Enviar un campo login/username devuelve el agregado global del agente.
  *   JUGAYGANA_REVENUE_LOGIN_FIELD      - DEPRECATED: ya no se usa para identificar al usuario referido.
- *   JUGAYGANA_REVENUE_DATE_FORMAT      - formato de fechas ("iso", "epoch_ms", "epoch_s" – default: "iso")
+ *   JUGAYGANA_REVENUE_DATE_FORMAT      - DEPRECATED (2026-08-29): se IGNORA. Las fechas van SIEMPRE como epoch en
+ *                                        segundos (instantes ART 00:00:00-03:00 → 23:59:59-03:00). Mandar
+ *                                        "YYYY-MM-DD" o "YYYY-MM-DD HH:mm:ss" (sin zona) JUGAYGANA lo lee como
+ *                                        UTC → ventana corrida 3 h (21:00→21:00 ART) y con fin excluido.
  *   JUGAYGANA_REVENUE_DATE_FROM_FIELD  - nombre del campo fecha inicio en el body (default: "date_from")
  *   JUGAYGANA_REVENUE_DATE_TO_FIELD    - nombre del campo fecha fin en el body (default: "date_to")
  *   JUGAYGANA_REPORTS_TOKEN_IN_BODY    - si "true", también envía el token como campo "token" en el body JSON
@@ -74,18 +77,22 @@ const REVENUE_CHILD_USER_ID_FIELD = process.env.JUGAYGANA_REVENUE_CHILD_USER_ID_
 // Esta constante se mantiene solo para no romper configuraciones existentes, pero no se aplica al revenue.
 const REVENUE_LOGIN_FIELD = process.env.JUGAYGANA_REVENUE_LOGIN_FIELD || 'login';
 
-// Formato de fechas para el body ("iso" = "YYYY-MM-DD", "epoch_ms" = milisegundos, "epoch_s" = segundos)
-const ALLOWED_DATE_FORMATS = ['iso', 'epoch_ms', 'epoch_s'];
-const REVENUE_DATE_FORMAT_RAW = process.env.JUGAYGANA_REVENUE_DATE_FORMAT || 'iso';
-const REVENUE_DATE_FORMAT = ALLOWED_DATE_FORMATS.includes(REVENUE_DATE_FORMAT_RAW)
-  ? REVENUE_DATE_FORMAT_RAW
-  : (() => {
-      logger.warn(
-        `[ReferralRevenue] JUGAYGANA_REVENUE_DATE_FORMAT="${REVENUE_DATE_FORMAT_RAW}" no es un valor válido ` +
-        `(permitidos: ${ALLOWED_DATE_FORMATS.join(', ')}). Usando "iso".`
-      );
-      return 'iso';
-    })();
+// Formato de fechas para el body: SIEMPRE epoch en SEGUNDOS (regla del owner
+// 2026-08-29, verificada contra "Reportes globales" del panel de JUGAYGANA).
+// El día de reembolso es el día calendario ARGENTINO: D 00:00:00-03:00 → D
+// 23:59:59-03:00 (ej. 28/08/2026 = 1787886000 → 1787972399). Antes el default
+// era "iso" = `toISOString().split('T')[0]` = fecha en texto EN UTC: el from
+// caía bien (D) pero el to se iba a D+1 y JUGAYGANA leía ambos como medianoche
+// UTC con fin excluido → ventana real 21:00 del día anterior → 21:00 de D (ART):
+// le cortaba a los clientes el pico nocturno (21–24 hs). Los formatos "iso" y
+// "epoch_ms" quedan ELIMINADOS; la env var se ignora con warning.
+const REVENUE_DATE_FORMAT = 'epoch_s';
+if (process.env.JUGAYGANA_REVENUE_DATE_FORMAT && process.env.JUGAYGANA_REVENUE_DATE_FORMAT !== 'epoch_s') {
+  logger.warn(
+    `[ReferralRevenue] JUGAYGANA_REVENUE_DATE_FORMAT="${process.env.JUGAYGANA_REVENUE_DATE_FORMAT}" se IGNORA: ` +
+    `las fechas a royalty-statistics van siempre como epoch en segundos (hora Argentina).`
+  );
+}
 
 // Nombres de los campos de fecha inicio/fin en el body del endpoint de revenue
 const REVENUE_DATE_FROM_FIELD = process.env.JUGAYGANA_REVENUE_DATE_FROM_FIELD || 'date_from';
@@ -285,17 +292,12 @@ function buildAuthHeaders(token) {
 }
 
 /**
- * Formatear fechas para el body según REVENUE_DATE_FORMAT
+ * Formatear fechas para el body: epoch en SEGUNDOS, nunca texto (ver nota en
+ * REVENUE_DATE_FORMAT). `date` se conserva en la firma por los callers.
  */
 function formatRevenueDate(date, epochSecs) {
-  if (REVENUE_DATE_FORMAT === 'epoch_s') {
-    return epochSecs;
-  }
-  if (REVENUE_DATE_FORMAT === 'epoch_ms') {
-    return date.getTime();
-  }
-  // default: "iso" → "YYYY-MM-DD"
-  return date.toISOString().split('T')[0];
+  const n = Number(epochSecs);
+  return Number.isFinite(n) ? n : Math.floor(date.getTime() / 1000);
 }
 
 /**

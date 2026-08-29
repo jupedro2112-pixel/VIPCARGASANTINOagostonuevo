@@ -44,8 +44,14 @@ function formatPeriodKey(year, month) {
  */
 function getPeriodRange(periodKey) {
   const [year, month] = periodKey.split('-').map(Number);
-  const fromDate = new Date(year, month - 1, 1, 0, 0, 0, 0);
-  const toDate = new Date(year, month, 0, 23, 59, 59, 999); // last day of month
+  // Mes calendario en hora ARGENTINA (-03:00): día 1 00:00:00 → último día
+  // 23:59:59. Antes usaba `new Date(y, m-1, 1)` = hora LOCAL del server, que en
+  // AWS es UTC → el mes arrancaba a las 21:00 ART del día anterior (3 h corridas
+  // en el revenue de referidos). Regla del owner 2026-08-29: siempre ART + epoch.
+  const mm = String(month).padStart(2, '0');
+  const lastDay = new Date(year, month, 0).getDate(); // último día del mes (local; no depende de TZ)
+  const fromDate = new Date(`${year}-${mm}-01T00:00:00-03:00`);
+  const toDate = new Date(`${year}-${mm}-${String(lastDay).padStart(2, '0')}T23:59:59-03:00`);
   return {
     fromEpoch: Math.floor(fromDate.getTime() / 1000),
     toEpoch: Math.floor(toDate.getTime() / 1000),
