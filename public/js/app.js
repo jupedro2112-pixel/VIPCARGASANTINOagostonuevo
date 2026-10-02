@@ -378,6 +378,10 @@ function setupEventListeners() {
         const referralBtn = document.getElementById('referralBtn');
         if (referralBtn) referralBtn.addEventListener('click', () => VIP.ui.openReferralModal());
 
+        // Regalos con código (#103: lotes con regalo)
+        const giftCodeBtn = document.getElementById('giftCodeBtn');
+        if (giftCodeBtn) giftCodeBtn.addEventListener('click', () => VIP.ui.openGiftCodeModal());
+
         // Info modal
         const infoBtn = document.getElementById('infoBtn');
         if (infoBtn) infoBtn.addEventListener('click', () => {

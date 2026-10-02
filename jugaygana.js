@@ -870,6 +870,183 @@ async function creditUserBalance(username, amount, jugayganaUserId = null) {
   return { success: false, error: lastError };
 }
 
+// ============================================================
+// CRÉDITO VERIFICADO (individual_bonus SIN reenvío a ciegas) — réplica del #151 del
+// repo hermano AUTOREEMBOLSOSjygactivo (WORKLOG #103 de este repo).
+// JUGAYGANA puede PROCESAR un DepositMoney y aun así responder HTML de Cloudflare o
+// cortar la conexión (timeout). Reenviar "por las dudas" = doble acreditación. Regla:
+//   · Respuesta JSON con success:false  → la API lo RECHAZÓ → reintentar es seguro.
+//     (incluye el JSON de "token inválido": se renueva la sesión y se reintenta).
+//   · HTML / timeout / excepción        → AMBIGUO → se VERIFICA POR SALDO
+//     (saldo antes vs. después):
+//       confirmed   → se da por hecho (success + verifiedByBalance).
+//       not_applied → el saldo no se movió → reintentar es seguro.
+//       unknown     → no se pudo leer o el saldo se movió distinto (el cliente
+//                     está jugando) → NO reintentar: { success:false, ambiguous:true }
+//                     y el caller avisa "VERIFICAR" al agente.
+// Diferencia con el hermano: allá un HTML se trata primero como "sesión inválida"
+// (isSessionError incluye HTML) y se reenvía una vez tras re-loguear; acá el HTML
+// NUNCA dispara un reenvío sin verificar el saldo antes.
+// ⚠️ Hoy la usan SOLO los lotes con regalo (bono automático en la carga y regalo de
+// fichas). creditUserBalance (arriba) conserva su comportamiento histórico (reintenta
+// ante HTML) para los flujos que ya estaban en producción.
+// ============================================================
+async function _readBalanceForVerify(username, attempts = 3) {
+  // ShowUsers es la llamada más frágil. Hasta 3 intentos (0 / 1,5 / 3 s) antes de dar
+  // el saldo por ilegible.
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await new Promise(r => setTimeout(r, 1500 * i));
+    try {
+      const r = await lookupUserOrError(username);
+      if (r.status === 'found' && r.user && Number.isFinite(Number(r.user.balance))) return Number(r.user.balance);
+      if (r.status === 'not_found') return null; // la API respondió: no hay saldo que leer
+    } catch (_) {}
+  }
+  return null;
+}
+// minStable = lecturas "saldo sin cambios" necesarias para dar la operación por NO
+// aplicada (2 tras un HTML; 4 tras un timeout/excepción, donde el origen pudo quedar
+// procesando y aplicar tarde).
+async function _verifyMoneyByBalance(username, before, expectedDelta, label, minStable = 2) {
+  if (before === null || before === undefined) return 'unknown';
+  let stableReads = 0;
+  // 6 lecturas en ~40 s (2,5 · 3 · 5 · 8 · 10 · 12 s).
+  const waits = [2500, 3000, 5000, 8000, 10000, 12000];
+  for (let i = 0; i < waits.length; i++) {
+    await new Promise(r => setTimeout(r, waits[i]));
+    const after = await _readBalanceForVerify(username);
+    if (after === null) continue;
+    const delta = after - before;
+    // Tolerancia 1% (mín. $1), pero nunca más de la mitad del monto: con montos
+    // chicos un saldo SIN cambios no puede confundirse con "confirmado".
+    const tol = Math.min(Math.max(1, Math.abs(expectedDelta) * 0.01), Math.abs(expectedDelta) / 2);
+    if (Math.abs(delta - expectedDelta) <= tol) {
+      console.warn(`✅ [verify-saldo] ${label} ${username}: CONFIRMADO por saldo (${before} → ${after}, esperado ${expectedDelta >= 0 ? '+' : ''}${expectedDelta})`);
+      return 'confirmed';
+    }
+    if (Math.abs(delta) <= 0.5) { stableReads++; if (stableReads >= minStable) { console.warn(`ℹ️ [verify-saldo] ${label} ${username}: saldo sin cambios (${before}) → NO se aplicó`); return 'not_applied'; } continue; }
+    console.warn(`⚠️ [verify-saldo] ${label} ${username}: saldo cambió distinto a lo esperado (${before} → ${after}, esperado ${expectedDelta}) → AMBIGUO`);
+    return 'unknown';
+  }
+  return 'unknown';
+}
+const _AMBIGUOUS_MSG = (label, why) => `JUGAYGANA no confirmó ${label} (${why}) y no se pudo verificar por saldo. NO reintentar a ciegas: VERIFICAR el saldo del cliente en JUGAYGANA antes de repetir la operación.`;
+
+async function creditUserBalanceVerified(username, amount, jugayganaUserId = null) {
+  console.log(`💰 Cargando $${amount} a ${username} (individual_bonus, verificado)${jugayganaUserId ? ' [usando ID guardado]' : ''}`);
+
+  const ok = await ensureSession();
+  if (!ok) return { success: false, error: 'No hay sesión válida' };
+
+  let childId = jugayganaUserId;
+  if (!childId) {
+    // Tri-estado: un fallo de la búsqueda NO es "no existe". En ambos casos no se
+    // envió nada → es un fallo LIMPIO (el caller puede liberar su reserva).
+    const lk = await lookupUserOrError(username);
+    if (lk.status !== 'found' || !lk.user) {
+      return { success: false, error: lk.status === 'not_found' ? 'Usuario no encontrado' : errToString(lk.error, 'No se pudo buscar el usuario en JUGAYGANA') };
+    }
+    childId = lk.user.id;
+  }
+
+  const amountCents = Math.round(parseFloat(amount) * 100);
+
+  // Builders re-evaluables (SESSION_TOKEN puede cambiar entre intentos si
+  // renovamos la sesión a mitad de camino).
+  const buildBody = () => toFormUrlEncoded({
+    action: 'DepositMoney',
+    token: SESSION_TOKEN,
+    childid: childId,
+    amount: amountCents,
+    currency: 'ARS',
+    deposit_type: 'individual_bonus'
+  });
+  const buildHeaders = () => {
+    const h = {};
+    if (SESSION_COOKIE) h.Cookie = SESSION_COOKIE;
+    return h;
+  };
+
+  // Hasta 3 intentos, pero SOLO se reenvía cuando es SEGURO (la API rechazó con
+  // JSON, o el saldo verificado no se movió). Ante HTML/timeout se verifica por
+  // saldo; si no se puede confirmar, se corta con ambiguous:true.
+  const before = await _readBalanceForVerify(username);
+  // Si el saldo previo no se pudo leer (ShowUsers caído) se ENVÍA igual: DepositMoney
+  // va por id y suele andar aunque ShowUsers falle. Sin `before`, un envío que falle
+  // sin respuesta queda ambiguo (alerta) — es el caso raro, no el común.
+  if (before === null) console.warn(`⚠️ creditUserBalanceVerified(${username}, $${amount}): sin saldo previo (ShowUsers no responde) — se envía igual`);
+  let lastError = 'desconocido';
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    // La sesión pudo invalidarse en el intento anterior → renovarla ANTES de enviar
+    // (si no se puede, no se envió nada en este intento: fallo limpio).
+    if (!SESSION_TOKEN) {
+      const renewed = await ensureSession();
+      if (!renewed) return { success: false, error: 'No se pudo renovar la sesión' };
+    }
+    let outcome = 'fail'; // 'fail' = la API dijo que no (reintento seguro) | 'ambiguous'
+    let minStable = 2;
+    try {
+      const resp = await client.post('', buildBody(), { headers: buildHeaders() });
+      const data = parsePossiblyWrappedJson(resp.data);
+      // Solo un OBJETO JSON con success:false o con `error` prueba que la API RECHAZÓ.
+      const isRejection = !!data && typeof data === 'object' && !data.success && (data.success === false || data.error != null);
+
+      // ⚠️ El HTML se evalúa ANTES que la sesión: isSessionError() también devuelve
+      // true para HTML (Cloudflare), y renovar + reenviar ahí sería un reenvío a
+      // ciegas de un DepositMoney que pudo haberse procesado. HTML = AMBIGUO.
+      if (isHtmlBlocked(data)) {
+        lastError = 'JUGAYGANA respondió HTML/Cloudflare';
+        outcome = 'ambiguous';
+      } else if (data && data.success) {
+        console.log(`✅ creditUserBalanceVerified(${username}) OK${attempt > 1 ? ` en intento ${attempt}/3` : ''}`);
+        return { success: true, data: data };
+      } else if (!isRejection) {
+        // Cuerpo vacío, texto plano de un proxy, null u objeto sin `success`: no se
+        // sabe si se procesó → AMBIGUO (jamás reenviar sin verificar el saldo).
+        lastError = `respuesta sin formato reconocible de JUGAYGANA (${typeof data === 'string' ? JSON.stringify(data.slice(0, 80)) : safeJson(data).slice(0, 80)})`;
+        outcome = 'ambiguous';
+        console.error(`❌ creditUserBalanceVerified(${username}) intento ${attempt}/3: ${lastError}`);
+      } else if (isSessionError(data, resp.status)) {
+        // JSON que dice "token/sesión inválida": la API RECHAZÓ (no procesó) →
+        // renovar la sesión y reintentar en el próximo intento es seguro.
+        console.error(`🔄 creditUserBalanceVerified(${username}) intento ${attempt}: sesión inválida, renovando...`);
+        lastError = 'Sesión inválida en JUGAYGANA';
+        invalidateSession();
+        outcome = 'fail';
+      } else {
+        lastError = errToString((data && (data.error || data.message)) || 'API Error');
+        console.error(`❌ creditUserBalanceVerified(${username}) intento ${attempt}/3 rechazado por la API: ${typeof data === 'string' ? data.slice(0,200) : safeJson(data).slice(0,200)}`);
+        outcome = 'fail';
+      }
+    } catch (err) {
+      lastError = err.message;
+      outcome = 'ambiguous';
+      minStable = 4; // timeout/corte: el origen pudo quedar procesando → exigir más lecturas estables
+      console.error(`❌ creditUserBalanceVerified(${username}) intento ${attempt}/3 excepción: ${err.message} (code=${err.code || 'n/a'})`);
+    }
+
+    if (outcome === 'ambiguous') {
+      const v = await _verifyMoneyByBalance(username, before, Number(amount), `crédito $${amount}`, minStable);
+      if (v === 'confirmed') return { success: true, data: { verifiedByBalance: true }, verifiedByBalance: true };
+      if (v === 'unknown') {
+        const msg = _AMBIGUOUS_MSG(`el crédito de $${amount}`, lastError);
+        console.error(`🛑 creditUserBalanceVerified(${username}, $${amount}) AMBIGUO — sin reintento: ${msg}`);
+        return { success: false, ambiguous: true, error: msg };
+      }
+      // not_applied → el saldo no se movió: reintentar es seguro.
+    }
+
+    if (attempt < 3) {
+      const backoffMs = 2000 * attempt;
+      await new Promise(r => setTimeout(r, backoffMs));
+    }
+  }
+
+  console.error(`❌ creditUserBalanceVerified(${username}, $${amount}) AGOTÓ 3 intentos. Último error: ${lastError}`);
+  return { success: false, error: lastError };
+}
+
 // ============================================
 // DEPÓSITO NORMAL (deposit_type: deposit)
 // ============================================
@@ -1567,6 +1744,8 @@ module.exports = {
   getUserNetLastMonth,
   checkClaimedToday,
   creditUserBalance,
+  /** individual_bonus SIN reenvío a ciegas: verifica por saldo y devuelve `ambiguous:true` si no puede confirmar (lotes con regalo). */
+  creditUserBalanceVerified,
   depositToUser,
   withdrawFromUser,
   changeUserPassword,

@@ -7,6 +7,8 @@
 >
 > Última actualización integral: **2026-07-09** (lectura de punta a punta de todo el
 > repo: server.js completo, clientes JUGAYGANA, 28 modelos, servicios, PWA y panel).
+> Actualizaciones parciales posteriores: reembolsos por rango/diario (#97–#102) y
+> **lotes con regalo (2026-10-02, #103)**.
 > Los números de línea derivan con cada cambio — usalos como referencia aproximada y
 > confirmá con grep.
 
@@ -36,8 +38,8 @@ El sistema VIPCARGAS:
   **rango** 🥉🥈🥇 por pérdida del mes; el diario se eliminó 2026-07-28 y VOLVIÓ
   2026-08-29 con su propio % por rango), **ruleta diaria**,
   **fueguito** (racha), **bono instalación** (cupón 100% próxima carga; antes $5.000),
-  **referidos** (7% del owner-revenue) y **campañas/publicistas** con sub-atribución
-  por influencer.
+  **referidos** (7% del owner-revenue), **campañas/publicistas** con sub-atribución
+  por influencer y **lotes de notificaciones con regalo** (% en la carga o fichas, #103).
 - El "saldo real" del jugador vive en JUGAYGANA; VIPCARGAS guarda atribución, bonos,
   reclamos y el registro permanente de transacciones.
 
@@ -116,7 +118,13 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   tracking de ROI), **NotifTemplate** (tipos: invitacion|regalo|reembolso — bono_50/100
   ELIMINADOS), **ScheduledNotif** (once/daily/weekly, worker cada 60s), **PromoBonus**
   (bono de carga vigente ≤30%, 1 sola carga, cap de LECTURA a 30% en
-  `_getActivePromoBonus`), **BonusStrategyConfig** + **StrategyEnrollment** (estrategia
+  `_getActivePromoBonus`; los de LOTE — `sourceRuleCode:'lote'`, `sourceRuleId`=id del
+  lote — están exentos del cap y suman `autoApply`, `applyScope` first|all,
+  `applyFromMin/ToMin` (franja diaria ART), `usesCount`, `usesTotalBonus`),
+  **NotifBatch** (lote con regalo #103: modo code|window, regalo percent|fixed,
+  audiencia, `sendDone` y `recipients[]` con canal/entrega/canje/crédito por
+  destinatario — el claim atómico por destinatario es la idempotencia del envío y del
+  canje), **BonusStrategyConfig** + **StrategyEnrollment** (estrategia
   por voto de encuesta — APAGADA), **EncuestaVote/EncuestaFire** (motor encuesta —
   bonos apagados), **InactividadFire** (motor inactivos — APAGADO).
 - **DailyRouletteSpin** — 1 giro/día (índices únicos userId+dateKey y
@@ -161,7 +169,7 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
 
 | Cliente | Usa | Para qué |
 |---|---|---|
-| `jugaygana.js` (raíz) | server.js | **Cargas/retiros/bonos/reembolsos.** `ensureSession` (mutex+retry), `lookupUserOrError` (tri-estado found/not_found/error — NO interpretar timeout como "no existe"), `depositToUser`/`withdrawFromUser` (con recovery CREATEUSER si not_found), `creditUserBalance` (bonus, 3 intentos, acepta `jugayganaUserId` para saltear el lookup), `syncUserToPlatform`, `changeUserPassword`, `getUserNet*`, rangos de fecha ART. **Montos ×100 (centavos).** |
+| `jugaygana.js` (raíz) | server.js | **Cargas/retiros/bonos/reembolsos.** `ensureSession` (mutex+retry), `lookupUserOrError` (tri-estado found/not_found/error — NO interpretar timeout como "no existe"), `depositToUser`/`withdrawFromUser` (con recovery CREATEUSER si not_found), `creditUserBalance` (bonus, 3 intentos — ⚠️ REENVÍA ante HTML/timeout; acepta `jugayganaUserId` para saltear el lookup), **`creditUserBalanceVerified`** (#103: mismo crédito SIN reenvío a ciegas — verifica por saldo y devuelve `ambiguous:true` si no puede confirmar; hoy solo la usan los lotes), `syncUserToPlatform`, `changeUserPassword`, `getUserNet*`, rangos de fecha ART. **Montos ×100 (centavos).** |
 | `jugaygana-movements.js` (raíz) | server.js | `getUserBalance(WithRetry)` y `makeBonus` (delega en el anterior). ⚠️ Sus `makeDeposit`/`makeWithdrawal` mandan el monto SIN ×100 y con recovery inferior — **no usarlos para mover plata** (hoy no los usa ningún flujo de plata). |
 | `src/services/jugayganaService.js` | referidos, passwords, platform-login | `bonus()` (DepositMoney+childid — NO CREDITBALANCE, regresión PR#189/190), `changeUserPasswordAsAdmin`, `loginAsUser`, `getUserInfo`. |
 | `src/services/jugayganaPublisherSessions.js` | publisher_admin create-user | Pool de sesiones por Campaign (creds propias del sub-agente). Firma sha1 de creds → re-login si cambian en DB. |
@@ -280,6 +288,34 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   `POST /api/admin/users/:id/install-bonus-100/apply` (update atómico con guard).
   Mensaje `/sys_install_bonus_100`. Reporte: sección "Bono App (100%)" del panel
   (`/api/admin/central/welcome-bonus` distingue legacy $5.000 vs cupón).
+- **Lotes con regalo** (#103, réplica de AUTOREEMBOLSOSjygactivo): el agente (admin/
+  depositor) arma el lote en panel → Notificaciones. `POST /api/admin/notif-batches/preview`
+  resuelve la audiencia (lista / segmento por cargas o login / todos) y muestra el canal
+  de cada uno; `POST /api/admin/notif-batches` crea el `NotifBatch` y patea el motor
+  (`_processNotifBatchQueue`): por cada destinatario, claim atómico → (modo window) crea
+  el PromoBonus o acredita las fichas → `Message` de sistema + `sendPushIfOffline`
+  (devuelve `{delivery}`) → guarda la entrega. Código PÚBLICO = lote sin destinatarios
+  (`sendDone:true`), los que canjean se appendean. `GET /api/admin/notif-batches[/:id]` =
+  historial + detalle (fuerza el vencimiento lazy de los bonos del lote).
+  - **Canje** (`POST /api/gift-code/claim`, cliente, `giftCodeLimiter` 10/min por
+    usuario): `_tryClaimNotifBatchCode` reserva
+    atómico en `recipients` (un canje por usuario; cupo `maxClaims` en públicos) → fichas:
+    `_creditNotifBatchGift` (topes 3/24 h y $300k/7 d sobre Transaction `notif_batch`) →
+    %: `_activateBatchPromoBonus` (vence a `useHours` del canje; reemplaza el bono activo
+    anterior — UN cartel a la vez).
+  - **% automático en las cargas** (hooks en `POST /api/admin/deposit` si el agente NO
+    puso bonus, y en `hgcashAutoCarga`): `claimAutoPromoPercent` (reserva atómica; respeta
+    franja horaria ART) → `_loteBonusAmount` (tope: % completo hasta `firstCapARS` $5.000,
+    excedente al `firstExcessPct` 20% — `Config['hgcashAppBonus']`) →
+    `jugaygana.creditUserBalanceVerified` → `_finishLoteBonusCredit`: OK →
+    `settleAutoPromoPercent` + Transaction `bonus` `source:'notif_batch_auto'`; fallo
+    LIMPIO → `revertAutoPromoPercent` + nota interna; **AMBIGUO → bono consumido +
+    `_alertMoneyAmbiguous` (nota 🛑 + socket `security_alert`), nunca se reintenta**. La
+    carga MANUAL espera el crédito como mucho `LOTE_MANUAL_WAIT_MS` (20 s); pasado eso
+    responde y el bono se cierra en segundo plano (aviso aparte al cliente). Una carga = como mucho UN bono automático (si el agente carga con
+    bonus a mano va el suyo y el bloque ROI marca usado el del lote).
+  - Modo "lo aplica el agente": cartel verde del chat (`GET /api/admin/promo-bonus`,
+    incluye regalos de $ fijo) + `POST /api/admin/promo-bonus/:id/use`.
 - **SLA demoras**: reloj en ChatStatus (`delayClockOnUserMessage`/`delayClockResolve`);
   responder (mensaje/comando/carga/retiro/CBU) o cerrar lo resuelve; sobre-umbral →
   ChatDelay. Reporte `GET /api/admin/chat-delays` (solo admin).
@@ -291,7 +327,7 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   auth, socket, chat, ui, refunds, fire, roulette, reviews, promobonus, notifications,
   withdraw, installbonus, notifsurvey, publisherwelcome, campaign, meta-pixel, apptest,
   app). El orden real de carga está en index.html (el comentario de app.js está viejo).
-- **SW único**: `firebase-messaging-sw.js` (CACHE_VERSION v52) — FCM + caché:
+- **SW único**: `firebase-messaging-sw.js` (CACHE_VERSION v53) — FCM + caché:
   `/js/` y `/css/` stale-while-revalidate (deploy llega en la SIGUIENTE carga sin
   bumpear versión), `/app.js` y manifest network-first, API/socket nunca. `user-sw.js`
   es un stub de auto-desregistro (no volver a registrarlo).
@@ -299,11 +335,15 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   deploy que cambia HTML y JS JUNTOS corre UNA carga con HTML nuevo + JS viejo del
   caché SWR (TypeError si el HTML cambió el DOM — casi pasó con el botón del
   reembolso diario). Al cambiar HTML+JS juntos: bumpear `?v` y CACHE_VERSION al
-  mismo número (hoy v52). Cambios de JS solo (sin DOM nuevo) siguen sin necesitar bump.
+  mismo número (hoy v53). Cambios de JS solo (sin DOM nuevo) siguen sin necesitar bump.
 - **FCM**: todo el manejo real (getToken 3 tiers, refresh, register-token) está en el
   INLINE de index.html; `window.sendFcmTokenAfterLogin` del inline pisa a propósito la
   de notifications.js. Firebase config duplicada en index.html Y en el SW (cambiar
   ambas). iOS: push solo en PWA instalada.
+- **Regalos con código** (#103): botón 🎁 de la barra → `#giftCodeModal` (vistas
+  canjear / ℹ️ información con estado de app y notificaciones + link a Telegram);
+  funciones en `VIP.ui` (`openGiftCodeModal`, `claimGiftCode`, `giftCodeShowView`,
+  `giftInfoEnableNotifs`). `promobonus.js` pinta `#promoBonusCard` (bono % vigente).
 - SPA sin router: `#loginScreen`/`#chatScreen` + modales. Estado de login en globals
   `window._loginMode` etc. Interceptor global de fetch (auth.js) reabre el modal
   obligatorio ante 403 MUST_CHANGE_PASSWORD.
@@ -323,9 +363,13 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
 - Chat: `renderConversations` con coalescing rAF + delegación de eventos (#91);
   `selectConversation` → `loadUserInfo` → banners (bloqueo, fraude/multicuenta,
   fueguito 30%, tags/notas, payout pendiente con botones pay/other-bank/cancel/
-  dismiss/sync, promo bonus). Races protegidas por `activeConversationId` +
+  dismiss/sync, promo bonus — `loadChatPromoBonus`: verde = lo aplica el agente +
+  "Marcar usado"; azul ⚡ = bono de lote AUTOMÁTICO, informativo + "Cancelar bono"). Races protegidas por `activeConversationId` +
   AbortController — **no romper ese patrón**.
-- `admin-sw.js` (v26, scope /adminprivado2026/): network-first no-store para el shell.
+- Sección Notificaciones: card "🎁 Lote con regalo" + "📤 Lotes enviados" (#103;
+  `previewGiftBatch`/`sendGiftBatch`/`genGiftBatchCode`/`loadNotifBatches`/
+  `toggleNotifBatchDetail` van por onclick inline). Socket `security_alert` → toast rojo.
+- `admin-sw.js` (v27, scope /adminprivado2026/): network-first no-store para el shell.
   Bumpear `CACHE_VERSION` en cada cambio de admin.js/admin.css.
 - Mensajes `type:'system'` en el chat del panel (`createMessageElement`): `adminOnly:true`
   → VERDE + badge "🔒 INTERNO — el cliente NO lo ve" (el cliente nunca lo recibió);
@@ -348,6 +392,7 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
 | `_runDueSchedules` (ScheduledNotif) | 60 s | activo | lastRunAt |
 | `_pollPayingPayouts` | 45 s | activo (confirma pagos si el webhook no llegó) | handlePayoutStatusWebhook idempotente |
 | `_runFcmPrune` | 24 h | activo | flag anti-overlap en memoria |
+| `_processNotifBatchQueue` (envío de lotes con regalo) | 45 s (+ `setImmediate` al crear un lote) | activo | claim atómico por destinatario en `NotifBatch.recipients` (`delivery:null→'sending'`; los colgados >10 min se retoman) |
 | `fbAdsWebhook.startWorker` | 5 min | activo | nextRetryAt |
 | Limpieza mensajes >3d | 6 h | activo (red de seguridad del TTL) | deleteMany |
 
@@ -375,6 +420,12 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   y limpiar el flag después → TOCTOU/doble cobro). Patrón: `findOneAndUpdate` con guard
   del flag (ruleta, bono instalación, fueguito claim-reward) o `create` con índice único
   (reembolsos). Si el crédito falla, revertir la reserva. Ver #96.
+- **Crédito AUTOMÁTICO nuevo a JUGAYGANA = `jugaygana.creditUserBalanceVerified`**
+  (nunca reenviar a ciegas). Resultado `ambiguous:true` ⇒ NO liberar la reserva, NO
+  reintentar, `_alertMoneyAmbiguous(ctx, userId, username, amount, err)`. Ver #103.
+- **Fuentes de Transaction que NO son carga real** (`metadata.source`): `install_bonus`,
+  `welcome_gift`, `payout_refund`, `notif_batch` (fichas de lote), `notif_batch_auto`
+  (% de lote). Lista nueva de "cargas reales" ⇒ excluirlas todas.
 - **Endpoints muertos**: se eliminan con comentario-lápida y rollback `git revert`.
 - **Validación local**: sólo `node --check` (no hay node_modules en Tails).
 
@@ -419,6 +470,25 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   HTML sin pasar por `renderIndexHtml`.
 - **Firebase config duplicada** (index.html + firebase-messaging-sw.js) y VAPID key en
   el inline: cambiar en ambos lados.
+- **`creditUserBalance` (histórico) REENVÍA ante HTML/timeout** (hasta 3 intentos +
+  reintento inline): puede acreditar doble si JUGAYGANA procesó y respondió HTML. Lo
+  usan reembolsos, ruleta, fueguito y el bonus manual (riesgo aceptado, #101). Los lotes
+  usan `creditUserBalanceVerified`. Migrar el resto es una tanda aparte (cada caller
+  tiene que aprender a manejar `ambiguous`).
+- **`isSessionError()` devuelve true para HTML**: en un flujo de plata, evaluar
+  `isHtmlBlocked` ANTES (si no, "renovar sesión + reenviar" es un reenvío a ciegas).
+- **Lotes con regalo (#103)**: rutas `app.get/post` SIEMPRE después de
+  `const authMiddleware` (TDZ; `node --check` no lo detecta). La franja horaria usa
+  `_argMinuteOfDay` (America/Argentina/Buenos_Aires), no el reloj del server. El
+  vencimiento del PromoBonus es LAZY (se marca `expired` al consultarlo). No quitar los
+  `updateOne` condicionales del motor ni del canje (son la idempotencia multi-instancia).
+  `recipients.creditStartedAt` se escribe ANTES de enviar fichas: marca sin `creditedAt`
+  = resultado desconocido → al retomar NO se re-acredita (alerta 🛑). El hook de la carga
+  manual va DESPUÉS de `hgcashConsumeOnManualDeposit` y no debe bloquear la respuesta
+  (un 504 con la carga ya hecha = el agente la repite).
+  El bloque "ROI" de la carga manual marca usado el PromoBonus activo cuando el agente
+  carga con bonus: con `_loteClaim` se saltea (si no, quemaría un bono "todas las cargas").
+  `Config['hgcashAppBonus']` acá es SOLO el tope del % de lote (no hay bono app).
 - **Fechas a royalty-statistics en epoch segundos ART** (no texto): mandar `YYYY-MM-DD`
   corre la ventana 3 h y le corta el pico nocturno al cliente (WORKLOG #102).
 - **`X-Token` en royalty-statistics** y **`child_user_id` obligatorio** — cambiarlos

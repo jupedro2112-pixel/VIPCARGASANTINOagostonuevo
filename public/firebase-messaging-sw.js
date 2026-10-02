@@ -34,7 +34,7 @@ try {
 // ============================================
 // CONFIGURACIÓN DE CACHÉ
 // ============================================
-const CACHE_VERSION = 'v52'; // v52: vuelve el reembolso diario (v51: rangos + cupón install 100%; v50: stale-while-revalidate js/css)
+const CACHE_VERSION = 'v53'; // v53: botón 🎁 + modal Regalos con código (lotes con regalo) (v52: vuelve el reembolso diario; v51: rangos + cupón install 100%; v50: stale-while-revalidate js/css)
 const CACHE_NAME = 'sala-juegos-fcm-' + CACHE_VERSION;
 
 // Logs por-fetch del SW (corren en CADA request). Apagados por default;

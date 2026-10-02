@@ -34,7 +34,7 @@ firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
 
 // Bump this version with every deploy so the admin PWA always loads fresh code.
-const CACHE_VERSION = 'v26'; // v26: % diario por rango en la card de reembolsos (v25: mensajes internos en verde)
+const CACHE_VERSION = 'v27'; // v27: lotes con regalo (card + historial + banner de bono automático) (v26: % diario por rango en la card de reembolsos; v25: mensajes internos en verde)
 const CACHE_NAME = 'admin-sala-' + CACHE_VERSION;
 
 // Only pre-cache stable assets (icons rarely change).

@@ -4,7 +4,182 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-08-29**
+> **Última actualización: 2026-10-02**
+
+## Sesión 2026-10-02
+
+### 103. 🎁 LOTES DE NOTIFICACIONES CON REGALO — réplica completa del repo hermano (con crédito VERIFICADO, sin reenvío a ciegas)
+- **Pedido del owner:** implementar acá el sistema completo de "🎁 Lote con regalo" EXACTAMENTE como
+  funciona en `AUTOREEMBOLSOSjygactivo` (paquete `docs/replicas/lotes-jugaygana/` de aquel repo, commit
+  `714dd04`; sus #149 base, #150 modal info, #172 tope del %, #173 bono canjeado vence a 24 h + resumen).
+- **Qué hace:** un agente (admin general o depositor) manda una notificación (push + mensaje de chat) a
+  una AUDIENCIA — lista pegada / segmento (ex-cargadores, sin entrar, cargadores recientes; con mín.
+  cargas, mín. $, publicista y cupo) / todos / código PÚBLICO (no se envía nada: el código se sube a
+  Telegram/redes) — con un REGALO:
+  - **% en la carga**, en dos modos: **⚡ automático** (el sistema lo suma SOLO en la carga manual sin
+    bonus del agente o en la carga hgcash; alcance "1ª carga" o "todas las cargas hasta vencer"; franja
+    horaria diaria opcional en hora ARGENTINA, minuto final inclusive) o **🧑‍💼 lo aplica el agente**
+    (cartel verde del chat + "Marcar usado"). **Tope del %:** se aplica completo sobre los primeros
+    $5.000 de la carga y el excedente al 20% (lote 100%, carga $10.000 → bono $6.000).
+  - **Fichas** fijas: se acreditan SOLAS (por código al canjear; por tiempo al enviarse el lote). Topes
+    anti-abuso por usuario: 3 créditos/24 h y $300.000/7 d → se bloquea + alerta roja.
+  - Entrega **con código** (solo los del lote lo canjean desde el 🎁 de la PWA; tras canjear tienen
+    `useHours` — 24 default — para usarlo) o **por tiempo** (bono activado a todos por N horas).
+  - Historial "📤 Lotes enviados" con resumen por lote (canjearon / cargaron con el bono / activos /
+    vencidos sin usar) y detalle por destinatario (canal, entrega, canje, quién aplicó el bono).
+- **Modelos:** `src/models/NotifBatch.js` NUEVO (lote + `recipients[]` con entrega/canje/crédito por
+  destinatario). `PromoBonus` suma `autoApply`, `applyScope` (first|all), `applyFromMin/ToMin`,
+  `usesCount`, `usesTotalBonus`. El bono de un lote es un PromoBonus con `sourceRuleCode:'lote'` y
+  `sourceRuleId = batch.id`. Sin migraciones (colección nueva + campos con default).
+- **Backend (`server.js`):**
+  - Rutas nuevas (todas DESPUÉS de `const authMiddleware` — TDZ): `POST /api/admin/notif-batches/preview`,
+    `POST /api/admin/notif-batches`, `GET /api/admin/notif-batches`, `GET /api/admin/notif-batches/:id`,
+    `POST /api/gift-code/claim` (cliente; limiter PROPIO `giftCodeLimiter`, 10/min por USUARIO — no
+    comparte el contador de login por IP, así un código público difundido no deja sin login a los
+    clientes que salen por la misma IP). Enviar: `admin`/`depositor`; ver historial:
+    + `withdrawer`.
+  - `GET /api/admin/promo-bonus` ahora incluye regalos de $ fijo y devuelve `autoApply/applyScope/
+    applyFromMin/applyToMin/usesCount/capTxt`. `_getActivePromoBonus(username, {includeFixed})`: los
+    bonos de LOTE quedan EXENTOS del cap de lectura de 30% (los configura un agente a mano; el resto de
+    los bonos automáticos sigue capeado).
+  - **Motor de envío** `_processNotifBatchQueue` (cron 45 s en cada instancia + patada con `setImmediate`
+    al crear): claim ATÓMICO por destinatario (`delivery:null → 'sending'`), reanudable tras deploy
+    (los `sending` colgados >10 min se retoman), pausa 35 ms entre destinatarios. `sendPushIfOffline`
+    ahora DEVUELVE `{delivery: 'socket'|'push'|'none'|'error', sent, failed}` (los callers viejos lo ignoran).
+  - **Hook en la carga manual** (`POST /api/admin/deposit`): si el agente NO puso bonus y el cliente
+    tiene un % de lote automático vigente (y dentro de la franja), `claimAutoPromoPercent` reserva
+    atómico (scope first: `active→used`; scope all: `usesCount++`) → crédito → `_finishLoteBonusCredit`
+    (settle + Transaction, o revert, o alerta). Corre DESPUÉS de `recordUserActivity` y de
+    `hgcashConsumeOnManualDeposit`, y la request espera el crédito como mucho `LOTE_MANUAL_WAIT_MS`
+    (20 s): si JUGAYGANA está lenta el bono se cierra en SEGUNDO PLANO (nota interna "⏳ la CARGA ya
+    quedó acreditada: NO la repitas" + aviso aparte al cliente cuando entra) y la carga responde ya.
+    `bonus`/`bonusRequested` pasaron a `let` (el lote los pisa para que el mensaje y la Transaction del
+    depósito reflejen el bono). Con `_loteClaim` seteado se SALTEAN: el bloque "ROI" (que marcaría usado
+    un bono de alcance 'all'), la limpieza del premio de fueguito y la Transaction 'bonus' genérica.
+  - **Hook en `hgcashAutoCarga`**: mismo contrato, después de acreditar la carga y antes de leer el
+    saldo; si hubo bono usa `/sys_deposit_bonus`, la nota interna de la auto-carga lo detalla y la
+    Transaction de la carga queda con `bonus` = monto del bono (igual que la manual).
+  - Config `Config['hgcashAppBonus']` + `getHgcashAppBonusConfig()` + `_loteBonusAmount()` +
+    `_loteCapTxt()`: es SOLO el tope del % de lote (acá no existe el "bono app" del hermano). Sin card
+    en el panel: rige el default ($5.000 / 20%) salvo que se edite la config en la DB.
+  - `'notif_batch'` (fichas) y `'notif_batch_auto'` (% automático) sumados a TODAS las listas de fuentes
+    que no son "carga real" (`GIFT_SOURCES` de server.js ×5, ruleta, `publisherAnalyticsService`,
+    `inactividadService`). Hoy esas Transaction son `type:'bonus'` (no 'deposit'), así que es blindaje.
+- **⚠️ ADAPTACIÓN CLAVE DE PLATA — `jugaygana.creditUserBalanceVerified` (NUEVA):** el paquete asume que
+  `creditUserBalance` devuelve `{success, ambiguous, …}` (#151 del hermano). ACÁ `creditUserBalance` NO
+  tiene eso: ante HTML/timeout REENVÍA a ciegas hasta 3 veces (comportamiento histórico, riesgo ya
+  anotado en #101). Para no meter un bono automático nuevo sobre ese riesgo se agregó una función
+  aparte, que SOLO usan los lotes: lee el saldo antes, envía, y ante HTML/timeout **verifica por saldo**
+  (6 lecturas en ~40 s): `confirmed` → éxito; `not_applied` (saldo sin moverse) → reintento seguro;
+  `unknown` → `{success:false, ambiguous:true}` sin reintentar. El JSON de "token inválido" renueva la
+  sesión y reintenta (la API rechazó). Solo un OBJETO JSON con `success:false`/`error` cuenta como
+  rechazo: cuerpo vacío, texto plano o `{}` = ambiguo. Tras un timeout se exigen 4 lecturas de saldo
+  estables (no 2) antes de reintentar; la tolerancia nunca supera la mitad del monto. `creditUserBalance` y todos sus callers (reembolsos, ruleta,
+  fueguito, bonus manual) quedaron INTACTOS.
+  - **Hallazgo sobre el repo hermano (no se tocó aquel repo):** su `creditUserBalance` #151 evalúa
+    `isSessionError()` ANTES que el HTML, e `isSessionError` devuelve true para HTML → ante una respuesta
+    HTML re-loguea y REENVÍA una vez sin verificar el saldo. Acá el HTML se evalúa primero y nunca
+    dispara un reenvío sin verificación. Conviene avisarle a la sesión de aquel repo.
+  - Contrato en los callers: fallo LIMPIO → `revertAutoPromoPercent` + nota interna "aplicalo a mano";
+    AMBIGUO → el bono queda CONSUMIDO + `_alertMoneyAmbiguous` (nota 🛑 en el chat + socket
+    `security_alert` → toast rojo en el panel + log ERROR). Una excepción inesperada del crédito también
+    se trata como ambigua. Nunca se reintenta solo.
+- **Otras adaptaciones respecto del paquete (qué se cambió y por qué):**
+  - `_alertMoneyAmbiguous`: copiado sin el aviso por Telegram (acá no existe `telegramAlertService`).
+  - `_dupBank`/`_dupBankManual` (multicuenta por banco) y bono app `_appFirst`: no existen acá → el lote
+    es el único bono automático de una carga; se omitieron esos bloques.
+  - Carga manual: el paquete, tras el bono de lote, creaba ADEMÁS la Transaction 'bonus' genérica
+    ("Bonificación incluida en depósito") → doble registro contable. Acá se saltea (queda solo la de
+    `source:'notif_batch_auto'`). En el caso AMBIGUO el paquete le anunciaba el regalo al cliente; acá no
+    (el mensaje refleja solo lo confirmado, regla de este repo).
+  - Bono de $0 (carga ínfima): no se llama a JUGAYGANA; se libera la reserva.
+  - `_notifBatchDepositStats` (segmentos por cargas) excluye también `install_bonus`/`welcome_gift`
+    (en este repo son `type:'deposit'` de regalo), no solo `payout_refund`.
+  - Excepción en el crédito de fichas → `ambiguous:true` (el paquete liberaba la reserva del canje).
+  - **Marca `recipients.creditStartedAt`** (campo nuevo, no está en el paquete): se escribe ANTES de
+    enviar el crédito de fichas. Si el motor retoma un destinatario `sending` colgado que tiene la marca
+    sin `creditedAt` (deploy/caída entre el envío y el registro) NO vuelve a acreditar: deja
+    `creditError` "envío interrumpido — VERIFICAR" + alerta 🛑. En el paquete lo re-acreditaba.
+  - Canje con fichas ambiguo: además de la alerta escribe `creditError` (visible en el detalle del
+    lote). Si `_activateBatchPromoBonus` o el chequeo de topes fallan, la reserva del canje se LIBERA
+    (fallo limpio: no se movió plata) en vez de quemar el código.
+  - "✕ Cancelar bono" manda `{cancel:true}` → el PromoBonus queda `expired` (el paquete lo dejaba
+    `used` y el historial lo contaba como "cargó con el bono").
+  - Audiencias "sin entrar": `lastLogin: null` (matchea null Y ausente; el schema de acá guarda null,
+    con `$exists:false` los que nunca entraron quedaban afuera).
+  - Textos: el canje es "tocando el botón 🎁 de la barra de arriba" (el original decía "menú ☰").
+  - Panel: se QUITÓ el campo "🎯 Rollover del bono" (en JUGAYGANA no hay rollover; allá el input existe
+    pero el JS manda siempre 0) y de la guía ❓ las frases de rollover, ruletas, bono de 1ª carga y
+    multicuenta por banco, que acá no aplican. Se agregó el listener `security_alert` (toast rojo) que la
+    guía promete y el paquete no traía.
+  - PWA: `escapeHtml` local de ui.js no venía en el paquete → helper `_giftEsc`; `loadBalance()` →
+    `syncBalance()`. `promobonus.js` y `#promoBonusCard` YA existían idénticos → sin cambios.
+  - `sendPushIfOffline`, `renderSystemCommand`, `_emitAdminOnlyChatNote`, `_rouletteHasAppInstalled`,
+    `PromoBonus` (require), `loadChatPromoBonus`/`markChatPromoBonusUsed` y `#chatPromoBonusBanner` ya
+    existían: se ADAPTARON/reemplazaron en el lugar, sin duplicar.
+- **Front:** panel → sección Notificaciones: card "🎁 Lote con regalo" (con guía ❓) + "📤 Lotes
+  enviados"; banner del chat con bono ⚡ AUTOMÁTICO (informativo + "✕ Cancelar bono") y regalo de $ fijo;
+  `admin-sw.js` v26 → **v27**. PWA: botón 🎁 en la barra, modal "Regalos con código" (canjear + ℹ️
+  información con estado de app/notificaciones y link a Telegram); **`?v=53` + `CACHE_VERSION` v53**.
+- **Trade-offs / riesgos conocidos (documentados, no bugs):**
+  - `creditUserBalanceVerified` hace una lectura de saldo (ShowUsers) antes de enviar y, ante HTML/
+    timeout, verifica por saldo (puede tardar minutos). En la carga MANUAL eso suma como mucho ~21 s
+    (700 ms + `LOTE_MANUAL_WAIT_MS`) y solo a clientes con bono auto vigente; el resto sigue en segundo
+    plano. Si el proceso se reinicia justo ahí, el bono puede quedar reservado sin acreditar ni nota.
+  - **Falso "confirmado por saldo" (sospecha, no verificable sin JUGAYGANA):** si el saldo que devuelve
+    ShowUsers viene ATRASADO (pasó en #61) y el bono es IGUAL a la carga (lote 100% con carga ≤ $5.000),
+    un HTML en el crédito del bono puede leerse como confirmado por el movimiento de la carga. Dirección:
+    el cliente NO recibe el bono y figura aplicado (no hay doble pago). Si un cliente reclama, mirar el
+    historial en JUGAYGANA.
+  - La verificación por saldo puede dar falso "ambiguo" si el cliente está jugando en ese momento
+    (dirección segura: no paga doble, pide revisar).
+  - El mensaje del lote NO se emite por socket: a un cliente online le llega el aviso in-app
+    (`admin_notification`) y el mensaje aparece en el chat al recargar/reabrir (igual que en el hermano).
+  - `Message` tiene TTL de 3 días y un lote puede valer hasta 7: el mensaje con el código desaparece
+    del chat antes que el código (el bono/código siguen valiendo).
+  - Si el agente carga CON bonus a mano, el bloque ROI marca usado el bono de lote vigente del cliente
+    (también uno de alcance "todas las cargas", y aunque el bonus del agente falle): comportamiento
+    heredado, igual que en el hermano ("si el cajero carga con bonus a mano, va el suyo y el del lote
+    queda usado"). Si el owner prefiere que un bono "todas las cargas" sobreviva, es un cambio chico.
+  - El cartel del chat ahora muestra también regalos de $ FIJO de otros motores (inactividad /
+    `regalo_ticket_alto`, hoy apagados) como "REGALO PENDIENTE" — antes se ocultaban.
+  - El rol `comunidad` hace cargas (el hook de lote le corre) pero NO puede enviar ni ver lotes
+    (solo admin/depositor envían; withdrawer ve), igual que en el hermano.
+- **Revisión adversarial (agente independiente, solo lectura) — 2 ALTA, 3 MEDIA, 9 BAJA.** Corregido:
+  (ALTA) el hook de la carga manual retenía la respuesta HTTP durante toda la verificación por saldo y
+  corría antes del consumo del movimiento hgcash → riesgo de que el agente repita la carga tras un 504
+  → ahora espera acotada + cierre en segundo plano; (MEDIA) el motor re-acreditaba fichas al retomar un
+  destinatario colgado → marca `creditStartedAt`; (MEDIA) un 200 con cuerpo no-JSON se trataba como
+  rechazo y se reenviaba → ahora es ambiguo; (BAJA) tolerancia con montos de $1, 4 lecturas estables
+  tras timeout, `creditError` en canje ambiguo, reservas quemadas por fallos limpios, "cancelar" ≠
+  "usado", `lastLogin:null`, `bonus` en la Transaction de la carga hgcash, limiter propio del canje.
+  NO corregido a propósito: la otra ALTA (el bonus manual del agente marca usado un lote "todas las
+  cargas") es el comportamiento documentado del hermano → queda como decisión del owner (ver trade-offs).
+  Secciones limpias según la revisión: identificadores/TDZ, campos de modelos, contrato front↔back.
+- **Validado:** `node --check` OK en todo lo tocado (server.js, jugaygana.js, modelos, servicios,
+  admin.js, ui.js, app.js, ambos SW). HTML del panel (606/606 `<div>`) y de la PWA (388/388)
+  balanceados; ids del DOM cruzados contra el JS. Prueba aislada de `_loteBonusAmount`/`_loteCapTxt`/
+  franja horaria ART (18 casos) y de `creditUserBalanceVerified` con axios mockeado (15 escenarios:
+  éxito, HTML con saldo confirmado, HTML sin movimiento → reintento, ambiguo por saldo distinto,
+  timeout con saldo ilegible, rechazo JSON ×3, token inválido → re-login, cuerpo vacío/`{}` → ambiguo,
+  timeout con saldo quieto, monto $1, sin id + lookup caído).
+  **NO se pudo correr el server** (sin node_modules) → el bloque de lotes y los hooks están validados
+  por lectura + revisión adversarial con agente, no en runtime. Las correcciones posteriores a la
+  revisión (espera acotada, `creditStartedAt`, etc.) NO tuvieron una segunda pasada de revisión. **Back necesita redeploy.**
+- **PROBAR tras deploy (en este orden, con una cuenta de prueba):**
+  1. Panel → Notificaciones: se ve la card "🎁 Lote con regalo" y "📤 Lotes enviados" (vacío).
+  2. Lote POR TIEMPO +20% ⚡ automático "1ª carga" → cartel ⚡ en el chat → carga MANUAL sin bonus →
+     carga + bono, mensaje "🎁 Incluye tu regalo", nota interna "quedó USADO". Segunda carga → sin bono.
+  3. Ídem con una carga hgcash real.
+  4. Lote 100% con carga de $10.000 → bono $6.000.
+  5. Franja 18:00–23:00 fuera de hora → carga sin bono y el cartel sigue.
+  6. Lote "lo aplica el agente" → cartel verde + Marcar usado.
+  7. Lote CON CÓDIGO (lista) → el cliente canjea con 🎁 → "Válido hasta" = canje + 24 h; uno de afuera
+     → "Este código no es para tu cuenta"; dejarlo vencer → el detalle dice "venció sin usar".
+  8. Fichas: 3 créditos seguidos al mismo usuario en 24 h → el 4º no sale y hay alerta roja.
+  9. Cancelar un bono ⚡ desde el cartel → el detalle del lote lo muestra "cancelado", no "cargó".
+  10. Logs: buscar `[notif-batch]`, `[lote-auto]`, `[money-ambiguous]`, `creditUserBalanceVerified`,
+      y que el canje no devuelva 429 inesperados (`Redis rate-limit error (gift)`).
 
 ## Sesión 2026-08-29
 

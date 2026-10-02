@@ -85,6 +85,14 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   manda SIEMPRE como **epoch en segundos** (`referralRevenueService` lo fuerza). Nunca
   fecha en texto ni `new Date(y, m, d)` (hora del server = UTC → ventana corrida 3 h).
   Rangos: helpers `get*RangeArgentinaEpoch` de `jugaygana.js`.
+- **Plata automática nueva → `jugaygana.creditUserBalanceVerified`** (verifica por
+  saldo, nunca reenvía a ciegas). Si devuelve `ambiguous:true`: NO liberar la reserva,
+  NO reintentar, llamar a `_alertMoneyAmbiguous`. ⚠️ `creditUserBalance` (el histórico
+  que usan reembolsos/ruleta/fueguito/bonus manual) SÍ reenvía ante HTML/timeout.
+- **Lotes con regalo** (#103, `NotifBatch` + PromoBonus `sourceRuleCode:'lote'`): el %
+  automático se engancha en `/api/admin/deposit` (solo si el agente NO puso bonus) y en
+  `hgcashAutoCarga`; una carga = como mucho UN bono automático. Los bonos de lote están
+  exentos del tope de 30%. Detalle en `docs/ARCHITECTURE.md` §5 y §9.
 - **Bonos automáticos APAGADOS por flags** (owner 2026-06-24): `INACTIVIDAD_DISABLED`
   y `BONUS_STRATEGY_DISABLED` (server.js) + `CHARGE_BONUSES_DISABLED`
   (notificationRulesService) + bonos de encuesta con `bDays=[]`. Tope 30% en TODO lo
