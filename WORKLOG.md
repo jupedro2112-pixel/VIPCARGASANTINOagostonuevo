@@ -4,7 +4,48 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-02**
+> **Última actualización: 2026-10-03**
+
+## Sesión 2026-10-03
+
+### 104. Lotes con regalo de FICHAS por tiempo: el cliente las RECLAMA con un botón (ya no se acreditan a todos al enviar)
+- **Pedido del owner:** "cuando se dé un lote y sea un regalo de saldo, que no se le acredite a todos
+  automáticamente, sino que tenga que reclamarlo; al cargarle a todos es pérdida de plata en gente que
+  después no va a jugar, cada carga cuesta dinero. Que el cliente tenga para reclamarlo ahí mismo, que sea
+  práctico, y que si lo reclama sí se cargue automáticamente como bono." Cambia la decisión del hermano
+  (#149: fichas por tiempo acreditadas a todos al enviar). El modo CON CÓDIGO ya era "reclamar para
+  cobrar" (canje) y no cambia.
+- **Backend (`server.js`):**
+  - Motor de envío: para `mode:'window' + giftType:'fixed'` SOLO avisa (push + mensaje "🎁 Tenés $X en
+    fichas de REGALO esperándote → tocá Reclamar… válido Nhs, si no lo reclamás se pierde"). No llama a
+    JUGAYGANA. Al crear el lote esos destinatarios nacen con `claimedAt:null` (antes = `sentAt`).
+  - **`GET /api/gift-code/pending`** → regalos de fichas por tiempo vigentes sin reclamar del usuario
+    (`_pendingFixedGiftsFor`). **`POST /api/gift-code/claim-pending {batchId}`** (`giftCodeLimiter`) →
+    `_tryClaimPendingGift`: reserva ATÓMICA en `recipients` (`claimedAt:null` → ahora, solo si el lote
+    sigue vigente) → `_creditFixedGiftAfterClaim` (helper NUEVO compartido con el canje por código:
+    topes anti-abuso, marca `creditStartedAt`, crédito VERIFICADO; ambiguo = reserva NO se libera +
+    `creditError` "VERIFICAR"; fallo limpio = se libera; OK = `creditedAt` + mensaje "🎉 ¡Regalo
+    reclamado!" + nota interna). `_tryClaimNotifBatchCode` ahora delega su rama de fichas en ese helper
+    (mismo comportamiento que antes para los códigos).
+  - Historial: `GET /api/admin/notif-batches` suma `credited` (reclamaron y cobraron); el detalle suma
+    `summary.acreditados / sinReclamar / vencidosSinReclamar` para lotes de fichas.
+- **PWA (`?v=54`, SW v54):** card dorada en el INICIO (`#giftPendingCard`, la pinta `promobonus.js` →
+  `VIP.promoBonus.loadGifts`, se refresca con el resto: al abrir, al volver a la app y cada 2 min) con
+  "¡Tenés $X de regalo! · vence en… · [Reclamar $X]"; la misma lista arriba del input del modal 🎁
+  (`#giftPendingBox`). `VIP.ui.claimPendingGift(batchId, btn)` → toast "💰 ¡Regalo acreditado!",
+  refresca saldo y chat. Helpers exportados: `fetchPendingGifts`, `renderPendingGiftCards`.
+- **Panel (admin-sw v28):** radio "💵 Fichas (el cliente las reclama con un botón)", guía ❓ y confirm
+  del envío reescritos ("la plata se acredita SOLO a los que lo toquen; máximo posible si reclaman
+  todos: $X"), historial "N reclamaron y cobraron ($)", detalle con "sin reclamar todavía" / "⏰ venció
+  sin reclamar" / "💰 reclamado … · acreditado" y resumen por lote de fichas.
+- **Sin cambios de modelo** (los campos ya existían). Lotes de fichas por tiempo creados ANTES de este
+  deploy ya fueron acreditados por el motor viejo (no quedan pendientes). Back necesita redeploy.
+- **Validado:** `node --check` OK (server.js, admin.js, ui.js, promobonus.js, ambos SW); HTML balanceado.
+  Sin runtime (sin node_modules). **PROBAR tras deploy:** lote por tiempo de $1.000 en fichas a una cuenta
+  de prueba → le llega el push y el mensaje; en el inicio aparece la card "Reclamar $1.000" (y en el 🎁);
+  tocar → toast + saldo sube + mensaje "🎉 ¡Regalo reclamado!" + nota interna; la card desaparece; un
+  segundo intento dice "Ya reclamaste"; en el panel el lote muestra "1 reclamaron y cobraron ($1.000)".
+  Dejar vencer otro sin reclamar → "⏰ venció sin reclamar" y NO hay crédito en JUGAYGANA.
 
 ## Sesión 2026-10-02
 

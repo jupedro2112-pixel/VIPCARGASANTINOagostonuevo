@@ -15973,7 +15973,13 @@ function _notifBatchChatContent(batch) {
       : _giftLabelOf(batch);
     return `${batch.message}\n\n🎁 Tu regalo: ${giftLabel}.\n🔑 Tu código: ${batch.code}\nCanjealo tocando el botón 🎁 de la barra de arriba ("Regalos con código"). ⏰ Válido por ${batch.validHours}hs${batch.giftType === 'percent' ? ` y, una vez canjeado, tenés ${Number(batch.useHours) > 0 ? batch.useHours : 24}hs para usarlo en tu carga` : ''}.`;
   }
-  // #263: % automático → no hay que avisar a nadie; % viejo → avisar al agente.
+  if (batch.giftType === 'fixed') {
+    // FICHAS POR TIEMPO (owner 2026-10-03): NO se acreditan al enviar — el cliente las
+    // RECLAMA con un botón (home / 🎁) y recién ahí se acreditan. Lo que no se reclama
+    // antes de vencer no cuesta plata.
+    return `${batch.message}\n\n🎁 Tenés $${Number(batch.amount).toLocaleString('es-AR')} en fichas de REGALO esperándote.\n👉 Abrí la app y tocá "Reclamar" (en el inicio o en el botón 🎁 de arriba): se acreditan al instante en tu cuenta.\n⏰ Válido por ${batch.validHours}hs — si no lo reclamás antes, se pierde.`;
+  }
+  // % automático → no hay que avisar a nadie; % del agente → avisar al agente.
   const como = (batch.giftType === 'percent' && batch.applyMode === 'auto')
     ? 'Se te suma SOLO cuando cargás, no tenés que avisar nada.'
     : 'Avisale al agente cuando cargues.';
@@ -16049,60 +16055,12 @@ async function _processOneNotifBatch(batchId) {
         let mensajeChat = chatContent;
         let notificar = true;
         if (batch.mode === 'window' && batch.giftType === 'fixed') {
-          // FICHAS POR TIEMPO = acreditación AUTOMÁTICA al enviar (owner
-          // 2026-08-10), con los mismos guards anti-abuso que el canje por
-          // código. Idempotente ante retomes: si ya tiene creditedAt (claim
-          // stale re-procesado) no se acredita de nuevo — y la reference fija
-          // hace imposible el doble pago igual.
+          // FICHAS POR TIEMPO (owner 2026-10-03): acá solo se AVISA. La plata se
+          // acredita cuando el cliente toca "Reclamar" (POST /api/gift-code/claim-pending),
+          // con reserva atómica + topes anti-abuso + crédito verificado. Si ya lo
+          // reclamó antes de que el motor llegara a él, el mensaje lo refleja.
           if (rec.creditedAt) {
-            // ya acreditado en un pase anterior: solo asegurar la notificación
-          } else if (rec.creditStartedAt) {
-            // RETOMA de un destinatario cuyo crédito se había ENVIADO sin registrar el
-            // resultado (deploy/caída a mitad, o verificación por saldo de más de 10
-            // min): NO se acredita de nuevo — puede haber entrado. Se verifica a mano.
-            await NotifBatch.updateOne(
-              { id: batchId, 'recipients.userId': u.id },
-              { $set: { 'recipients.$.creditError': 'envío interrumpido — VERIFICAR en JUGAYGANA si entró antes de acreditar a mano', 'recipients.$.claimedAt': null } }
-            ).catch(() => {});
-            await _alertMoneyAmbiguous('Regalo de fichas (lote, envío interrumpido)', u.id, u.username, batch.amount, 'el proceso se reinició mientras se acreditaba');
-            notificar = false;
-          } else {
-            const res2 = await _creditNotifBatchGift(u, batch, {
-              beforeSend: () => NotifBatch.updateOne(
-                { id: batchId, 'recipients.userId': u.id },
-                { $set: { 'recipients.$.creditStartedAt': new Date() } })
-            });
-            if (!res2.ok && res2.retryable) {
-              // API caída/lenta: dejar el recipient EN 'sending' — el claim
-              // vence a los 10 min y el motor lo reintenta solo (la reference
-              // fija hace imposible pagar dos veces si en realidad entró).
-              await NotifBatch.updateOne(
-                { id: batchId, 'recipients.userId': u.id },
-                { $set: { 'recipients.$.creditError': res2.reason || 'error transitorio' } }
-              ).catch(() => {});
-              dejarEnSending = true;
-              notificar = false;
-            } else if (!res2.ok) {
-              // Bloqueo definitivo (tope de seguridad / bono activo): sin
-              // crédito no se le promete nada — ni mensaje ni push.
-              await NotifBatch.updateOne(
-                { id: batchId, 'recipients.userId': u.id },
-                { $set: { 'recipients.$.creditError': res2.reason || 'bloqueado', 'recipients.$.claimedAt': null } }
-              ).catch(() => {});
-              notificar = false;
-            } else {
-              await NotifBatch.updateOne(
-                { id: batchId, 'recipients.userId': u.id },
-                { $set: { 'recipients.$.creditedAt': new Date(), 'recipients.$.creditTxId': res2.txId, 'recipients.$.creditError': null } }
-              ).catch(() => {});
-            }
-          }
-          if (notificar) {
-            const rollover = Math.max(0, Number(batch.rolloverX) || 0);
-            const rollTxt = rollover > 0
-              ? ` (bono con rollover x${rollover}: apostá ${rollover}× el monto y después podés retirar)`
-              : '';
-            mensajeChat = `${batch.message}\n\n💰 ¡Te ACREDITAMOS $${Number(batch.amount).toLocaleString('es-AR')} en fichas${rollTxt}! Ya están en tu cuenta. ¡A jugarlas! 🎰`;
+            mensajeChat = `${batch.message}\n\n💰 Tu regalo de $${Number(batch.amount).toLocaleString('es-AR')} en fichas ya fue reclamado y acreditado en tu cuenta. ¡A jugarlo! 🎰`;
           }
         } else if (batch.mode === 'window' && !rec.promoBonusId) {
           // % por tiempo: cartel verde del agente (PromoBonus), como siempre.
@@ -16220,6 +16178,111 @@ function _giftLabelOf(batch) {
   return `+${batch.amount}% EXTRA en tu próxima carga${batch.applyMode === 'auto' ? _batchWindowTxt(batch) : ''}${capTxt}`;
 }
 
+// Acredita el regalo de FICHAS de un lote a un usuario que YA tiene la reserva tomada en
+// `recipients` (claimedAt). Lo usan el canje por código (`codeUp`) y el botón "Reclamar"
+// de los regalos por tiempo (`codeUp` null). Devuelve { http, body }.
+//  - AMBIGUO (JUGAYGANA no confirmó): la reserva NO se libera + creditError "VERIFICAR".
+//  - Fallo limpio / bloqueo por tope: se libera la reserva (público: se lo saca de la lista).
+async function _creditFixedGiftAfterClaim(uDoc, batch, codeUp) {
+  const montoFmt = Number(batch.amount).toLocaleString('es-AR');
+  const porCodigo = !!codeUp;
+  const res2 = await _creditNotifBatchGift(uDoc, batch, {
+    beforeSend: () => NotifBatch.updateOne(
+      { id: batch.id, 'recipients.userId': uDoc.id },
+      { $set: { 'recipients.$.creditStartedAt': new Date() } })
+  });
+  if (!res2.ok && res2.ambiguous) {
+    // Puede haber entrado → la reserva NO se libera (evita canje doble). Queda
+    // visible en el detalle del lote para que el agente lo verifique.
+    await NotifBatch.updateOne(
+      { id: batch.id, 'recipients.userId': uDoc.id },
+      { $set: { 'recipients.$.creditError': 'VERIFICAR en JUGAYGANA: no se confirmó si el regalo entró (no reintentar a ciegas)' } }
+    ).catch(() => {});
+    return { http: 502, body: { error: `Tu regalo quedó en verificación (la plataforma no confirmó). Un agente lo revisa; no hace falta que vuelvas a ${porCodigo ? 'canjear' : 'reclamar'}.` } };
+  }
+  if (!res2.ok) {
+    // Liberar la reserva: en fallo transitorio puede reintentar; en bloqueo, que
+    // hable con soporte sin quemar el regalo. En un código PÚBLICO el usuario se
+    // agregó al canjear → se lo saca (no consume cupo).
+    if (batch.isPublic) {
+      await NotifBatch.updateOne(
+        { id: batch.id },
+        { $pull: { recipients: { userId: uDoc.id, creditedAt: null } } }
+      ).catch(() => {});
+    } else {
+      await NotifBatch.updateOne(
+        { id: batch.id, 'recipients.userId': uDoc.id },
+        { $set: { 'recipients.$.claimedAt': null, 'recipients.$.creditError': res2.reason || null } }
+      ).catch(() => {});
+    }
+    if (res2.blocked) {
+      return { http: 400, body: { error: 'No pudimos acreditar tu regalo. Hablá con el soporte desde el chat.' } };
+    }
+    return { http: 502, body: { error: 'No pudimos acreditar el regalo en este momento. Probá de nuevo en unos minutos.' } };
+  }
+  await NotifBatch.updateOne(
+    { id: batch.id, 'recipients.userId': uDoc.id },
+    { $set: { 'recipients.$.creditedAt': new Date(), 'recipients.$.creditTxId': res2.txId, 'recipients.$.creditError': null } }
+  ).catch(() => {});
+
+  const loteTxt = `lote de ${batch.sentBy}${batch.name ? ' ("' + batch.name + '")' : ''}`;
+  await Message.create({
+    id: uuidv4(), senderId: 'system', senderUsername: 'Sistema', senderRole: 'admin',
+    receiverId: uDoc.id, receiverRole: 'user',
+    content: `🎉 ¡${porCodigo ? 'Código canjeado' : 'Regalo reclamado'}, ${uDoc.username}!\n\n💰 Tu regalo de $${montoFmt} ya está ACREDITADO en tu cuenta. ¡A jugarlo! 🎰`,
+    type: 'system', timestamp: new Date(), read: false
+  }).catch(() => {});
+  await _emitAdminOnlyChatNote(
+    uDoc.id,
+    uDoc.username,
+    `💰 REGALO DE LOTE ACREDITADO AUTOMÁTICAMENTE ($${montoFmt}) — ${porCodigo ? 'canjeó el código' : 'tocó "Reclamar"'} del ${loteTxt}. No hay que hacer nada: la plata ya está en su cuenta.`
+  ).catch(() => {});
+  logger.info(`[notif-batch] ${uDoc.username} ${porCodigo ? 'canjeó ' + codeUp : 'reclamó el regalo'} (lote ${batch.id}) — $${batch.amount} acreditados`);
+  return {
+    http: 200,
+    body: {
+      success: true,
+      status: 'credited',
+      amount: batch.amount,
+      type: 'cash',
+      message: `${porCodigo ? '¡Código válido! ' : ''}Tu regalo de $${montoFmt} ya está acreditado en tu cuenta. 🎰`
+    }
+  };
+}
+
+// REGALOS DE FICHAS POR TIEMPO pendientes de RECLAMAR por un usuario (owner 2026-10-03:
+// las fichas de un lote "por tiempo" no se acreditan solas; el cliente las reclama).
+async function _pendingFixedGiftsFor(userId) {
+  const now = new Date();
+  const rows = await NotifBatch.find({
+    mode: 'window', giftType: 'fixed', expiresAt: { $gt: now },
+    recipients: { $elemMatch: { userId, claimedAt: null, creditedAt: null } }
+  }).select('id name amount message sentAt expiresAt sentBy').sort({ expiresAt: 1 }).limit(10).lean();
+  return rows.map((b) => ({ batchId: b.id, amount: b.amount, name: b.name || '', message: b.message, sentAt: b.sentAt, expiresAt: b.expiresAt }));
+}
+
+// Reclamo de un regalo de fichas por tiempo (botón "Reclamar" del home / modal 🎁).
+// Reserva atómica en recipients (un reclamo por usuario, solo mientras el lote esté
+// vigente) → crédito verificado por _creditFixedGiftAfterClaim. Devuelve { http, body }.
+async function _tryClaimPendingGift(reqUser, batchId) {
+  const now = new Date();
+  const batch = await NotifBatch.findOne({ id: String(batchId || ''), mode: 'window', giftType: 'fixed' }).lean();
+  if (!batch) return { http: 404, body: { error: 'Ese regalo no existe.' } };
+  const rec = (batch.recipients || []).find((r) => r.userId === reqUser.userId);
+  if (!rec) return { http: 400, body: { error: 'Este regalo no es para tu cuenta.' } };
+  if (rec.creditedAt) return { http: 400, body: { error: 'Ya reclamaste este regalo: está acreditado en tu cuenta.' } };
+  if (rec.claimedAt) return { http: 400, body: { error: 'Ya reclamaste este regalo. Si no lo ves en tu saldo, hablá con el soporte desde el chat.' } };
+  if (new Date(batch.expiresAt) <= now) return { http: 400, body: { error: '⏰ Este regalo ya venció. Estate atento a la próxima notificación.' } };
+  const uDoc = await User.findOne({ id: reqUser.userId }).select('id username role jugayganaUserId').lean();
+  if (!uDoc || uDoc.role !== 'user') return { http: 400, body: { error: 'Solo las cuentas de clientes pueden reclamar regalos.' } };
+  const upd = await NotifBatch.updateOne(
+    { id: batch.id, expiresAt: { $gt: now }, recipients: { $elemMatch: { userId: uDoc.id, claimedAt: null } } },
+    { $set: { 'recipients.$.claimedAt': now } }
+  );
+  if (!upd.modifiedCount) return { http: 400, body: { error: 'Ya reclamaste este regalo (o venció).' } };
+  return _creditFixedGiftAfterClaim(uDoc, batch, null);
+}
+
 // Canje de un código de LOTE. Devuelve null si el código no corresponde a
 // ningún lote (el caller sigue con el código de bienvenida) o { http, body }.
 // Exclusividad: el código solo sirve para quien está EN el lote; para el
@@ -16295,79 +16358,8 @@ async function _tryClaimNotifBatchCode(reqUser, attempt) {
     }
   }
 
-  // ============ REGALO DE FICHAS: acreditación AUTOMÁTICA ============
-  if (esFichas) {
-    const res2 = await _creditNotifBatchGift(uDoc, batch, {
-      beforeSend: () => NotifBatch.updateOne(
-        { id: batch.id, 'recipients.userId': uDoc.id },
-        { $set: { 'recipients.$.creditStartedAt': new Date() } })
-    });
-    if (!res2.ok && res2.ambiguous) {
-      // Puede haber entrado → la reserva NO se libera (evita canje doble). Queda
-      // visible en el detalle del lote para que el agente lo verifique.
-      await NotifBatch.updateOne(
-        { id: batch.id, 'recipients.userId': uDoc.id },
-        { $set: { 'recipients.$.creditError': 'VERIFICAR en JUGAYGANA: no se confirmó si el regalo entró (no reintentar a ciegas)' } }
-      ).catch(() => {});
-      return { http: 502, body: { error: 'Tu regalo quedó en verificación (la plataforma no confirmó). Un agente lo revisa; no hace falta que vuelvas a canjear.' } };
-    }
-    if (!res2.ok) {
-      // Liberar la reserva: en fallo transitorio puede reintentar (la
-      // reference fija evita el doble pago si en realidad SÍ se acreditó);
-      // en bloqueo, que hable con soporte sin quemar el código. En un código
-      // PÚBLICO el usuario se agregó al canjear → se lo saca (no consume cupo).
-      if (batch.isPublic) {
-        await NotifBatch.updateOne(
-          { id: batch.id },
-          { $pull: { recipients: { userId: uDoc.id, creditedAt: null } } }
-        ).catch(() => {});
-      } else {
-        await NotifBatch.updateOne(
-          { id: batch.id, 'recipients.userId': uDoc.id },
-          { $set: { 'recipients.$.claimedAt': null, 'recipients.$.creditError': res2.reason || null } }
-        ).catch(() => {});
-      }
-      if (res2.blocked && res2.reason === 'bono activo en el casino') {
-        return { http: 400, body: { error: 'Tenés un bono activo (o sin reclamar) en el casino. Terminalo y después canjeá tu código.' } };
-      }
-      if (res2.blocked) {
-        return { http: 400, body: { error: 'No pudimos acreditar tu regalo. Hablá con el soporte desde el chat.' } };
-      }
-      return { http: 502, body: { error: 'No pudimos acreditar el regalo en este momento. Probá de nuevo en unos minutos.' } };
-    }
-    await NotifBatch.updateOne(
-      { id: batch.id, 'recipients.userId': uDoc.id },
-      { $set: { 'recipients.$.creditedAt': new Date(), 'recipients.$.creditTxId': res2.txId, 'recipients.$.creditError': null } }
-    ).catch(() => {});
-
-    const rollover = Math.max(0, Number(batch.rolloverX) || 0);
-    const rollTxt = rollover > 0
-      ? ` (bono con rollover x${rollover}: apostá ${rollover}× el monto y después podés retirar)`
-      : '';
-    await Message.create({
-      id: uuidv4(), senderId: 'system', senderUsername: 'Sistema', senderRole: 'admin',
-      receiverId: uDoc.id, receiverRole: 'user',
-      content: `🎉 ¡Código canjeado, ${uDoc.username}!\n\n💰 Tu regalo de $${montoFmt} ya está ACREDITADO en tu cuenta${rollTxt}. ¡A jugarlo! 🎰`,
-      type: 'system', timestamp: new Date(), read: false
-    }).catch(() => {});
-    await _emitAdminOnlyChatNote(
-      uDoc.id,
-      uDoc.username,
-      `💰 REGALO DE LOTE ACREDITADO AUTOMÁTICAMENTE ($${montoFmt}${rollover > 0 ? ', rollover x' + rollover : ', sin rollover'}) — canjeó el código del lote de ${batch.sentBy}${batch.name ? ' ("' + batch.name + '")' : ''}. No hay que hacer nada: la plata ya está en su cuenta.`
-    ).catch(() => {});
-
-    logger.info(`[notif-batch] ${uDoc.username} canjeó ${codeUp} (lote ${batch.id}) — $${batch.amount} acreditados automáticamente (rollover x${rollover})`);
-    return {
-      http: 200,
-      body: {
-        success: true,
-        status: 'credited',
-        amount: batch.amount,
-        type: 'cash',
-        message: `¡Código válido! Tu regalo de $${montoFmt} ya está acreditado en tu cuenta. 🎰`
-      }
-    };
-  }
+  // ============ REGALO DE FICHAS: se acreditan al canjear ============
+  if (esFichas) return _creditFixedGiftAfterClaim(uDoc, batch, codeUp);
 
   // ============ % EN PRÓXIMA CARGA: cartel verde, lo aplica el agente ============
   let pb;
@@ -16628,9 +16620,10 @@ app.post('/api/admin/notif-batches', authMiddleware, adminMiddleware, async (req
       recipients: users.map((u) => ({
         userId: u.id, username: u.username,
         channel: _notifChannelOf(u), delivery: null, deliveryAt: null,
-        // Modo window: el bono nace activado para todos → claimedAt = envío
-        // (el PromoBonus lo crea el motor al procesar a cada uno).
-        claimedAt: mode === 'window' ? sentAt : null,
+        // Modo window con %: el bono nace activado para todos → claimedAt = envío
+        // (el PromoBonus lo crea el motor al procesar a cada uno). Con FICHAS por
+        // tiempo claimedAt queda null hasta que el cliente toque "Reclamar".
+        claimedAt: (mode === 'window' && giftType === 'percent') ? sentAt : null,
         promoBonusId: null
       }))
     };
@@ -16684,6 +16677,7 @@ app.get('/api/admin/notif-batches', authMiddleware, adminMiddleware, async (req,
         total: { $size: { $ifNull: ['$recipients', []] } },
         claimed: { $size: { $filter: { input: { $ifNull: ['$recipients', []] }, as: 'r', cond: { $ne: ['$$r.claimedAt', null] } } } },
         delivered: { $size: { $filter: { input: { $ifNull: ['$recipients', []] }, as: 'r', cond: { $in: ['$$r.delivery', ['socket', 'push']] } } } },
+        credited: { $size: { $filter: { input: { $ifNull: ['$recipients', []] }, as: 'r', cond: { $ne: ['$$r.creditedAt', null] } } } },
         pendientes: { $size: { $filter: { input: { $ifNull: ['$recipients', []] }, as: 'r', cond: { $in: ['$$r.delivery', [null, 'sending']] } } } },
         sinNotis: { $size: { $filter: { input: { $ifNull: ['$recipients', []] }, as: 'r', cond: { $eq: ['$$r.channel', 'none'] } } } }
       } }
@@ -16728,7 +16722,8 @@ app.get('/api/admin/notif-batches/:id', authMiddleware, adminMiddleware, async (
     const bonuses = pbIds.length ? await PromoBonus.find({ id: { $in: pbIds } })
       .select('id status usedBy usedAt expiresAt activatedAt autoApply applyScope usesCount usesTotalBonus cargaMonto').lean() : [];
     const pbMap = new Map(bonuses.map((p) => [p.id, p]));
-    const summary = { total: 0, canjearon: 0, usaron: 0, activos: 0, vencidos: 0, cancelados: 0, bonoTotal: 0 };
+    const summary = { total: 0, canjearon: 0, usaron: 0, activos: 0, vencidos: 0, cancelados: 0, bonoTotal: 0, acreditados: 0, sinReclamar: 0, vencidosSinReclamar: 0 };
+    const loteVencido = new Date(batch.expiresAt) <= now;
     const recipients = (batch.recipients || []).map((r) => {
       const pb = r.promoBonusId ? pbMap.get(r.promoBonusId) : null;
       // Estado resumido del bono: used | active | expired (venció sin usar) | cancelled
@@ -16748,6 +16743,10 @@ app.get('/api/admin/notif-batches/:id', authMiddleware, adminMiddleware, async (
       if (outcome === 'expired') summary.vencidos++;
       if (outcome === 'cancelled') summary.cancelados++;
       if (pb) summary.bonoTotal += Number(pb.usesTotalBonus) || 0;
+      if (batch.giftType === 'fixed') {
+        if (r.creditedAt) summary.acreditados++;
+        else if (!r.claimedAt && !r.creditError) { if (loteVencido) summary.vencidosSinReclamar++; else summary.sinReclamar++; }
+      }
       return {
         username: r.username,
         channel: r.channel,
@@ -16780,6 +16779,33 @@ app.get('/api/admin/notif-batches/:id', authMiddleware, adminMiddleware, async (
 // POST /api/gift-code/claim — el cliente canjea un código de LOTE desde la PWA
 // (botón 🎁 de la barra → modal "Regalos con código"). Este repo no tiene código de
 // bienvenida de comunidad, así que si no es un código de lote → "no válido".
+// GET /api/gift-code/pending — regalos de fichas por tiempo que el cliente todavía
+// puede RECLAMAR (card del home + modal 🎁).
+app.get('/api/gift-code/pending', authMiddleware, async (req, res) => {
+  try {
+    if (isAdminRole(req.user.role)) return res.json({ gifts: [] });
+    res.json({ gifts: await _pendingFixedGiftsFor(req.user.userId) });
+  } catch (err) {
+    logger.error(`/api/gift-code/pending: ${err.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// POST /api/gift-code/claim-pending { batchId } — el cliente RECLAMA un regalo de fichas
+// por tiempo: reserva atómica + topes anti-abuso + crédito verificado.
+app.post('/api/gift-code/claim-pending', authMiddleware, giftCodeLimiter, async (req, res) => {
+  try {
+    if (isAdminRole(req.user.role)) return res.status(403).json({ error: 'Solo clientes' });
+    const batchId = String((req.body || {}).batchId || '').trim();
+    if (!/^[A-Za-z0-9-]{8,64}$/.test(batchId)) return res.status(400).json({ error: 'Regalo inválido.' });
+    const r = await _tryClaimPendingGift(req.user, batchId);
+    res.status(r.http).json(r.body);
+  } catch (err) {
+    logger.error(`/api/gift-code/claim-pending: ${err.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
 app.post('/api/gift-code/claim', authMiddleware, giftCodeLimiter, async (req, res) => {
   try {
     if (isAdminRole(req.user.role)) return res.status(403).json({ error: 'Solo clientes' });

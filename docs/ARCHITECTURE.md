@@ -292,15 +292,22 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   depositor) arma el lote en panel → Notificaciones. `POST /api/admin/notif-batches/preview`
   resuelve la audiencia (lista / segmento por cargas o login / todos) y muestra el canal
   de cada uno; `POST /api/admin/notif-batches` crea el `NotifBatch` y patea el motor
-  (`_processNotifBatchQueue`): por cada destinatario, claim atómico → (modo window) crea
-  el PromoBonus o acredita las fichas → `Message` de sistema + `sendPushIfOffline`
+  (`_processNotifBatchQueue`): por cada destinatario, claim atómico → (modo window con %)
+  crea el PromoBonus → `Message` de sistema + `sendPushIfOffline`
   (devuelve `{delivery}`) → guarda la entrega. Código PÚBLICO = lote sin destinatarios
   (`sendDone:true`), los que canjean se appendean. `GET /api/admin/notif-batches[/:id]` =
   historial + detalle (fuerza el vencimiento lazy de los bonos del lote).
+  - **Fichas por tiempo = RECLAMAR** (owner 2026-10-03, #104): el motor solo avisa; el
+    cliente ve "Reclamar $X" en el inicio (`#giftPendingCard`) y en el modal 🎁
+    (`GET /api/gift-code/pending`) y `POST /api/gift-code/claim-pending {batchId}` →
+    `_tryClaimPendingGift` (reserva atómica `claimedAt`, solo lote vigente) →
+    `_creditFixedGiftAfterClaim` (topes, `creditStartedAt`, crédito verificado). Lo
+    que nadie reclama antes de vencer no cuesta plata.
   - **Canje** (`POST /api/gift-code/claim`, cliente, `giftCodeLimiter` 10/min por
     usuario): `_tryClaimNotifBatchCode` reserva
     atómico en `recipients` (un canje por usuario; cupo `maxClaims` en públicos) → fichas:
-    `_creditNotifBatchGift` (topes 3/24 h y $300k/7 d sobre Transaction `notif_batch`) →
+    `_creditFixedGiftAfterClaim` → `_creditNotifBatchGift` (topes 3/24 h y $300k/7 d
+    sobre Transaction `notif_batch`) →
     %: `_activateBatchPromoBonus` (vence a `useHours` del canje; reemplaza el bono activo
     anterior — UN cartel a la vez).
   - **% automático en las cargas** (hooks en `POST /api/admin/deposit` si el agente NO
@@ -327,7 +334,7 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   auth, socket, chat, ui, refunds, fire, roulette, reviews, promobonus, notifications,
   withdraw, installbonus, notifsurvey, publisherwelcome, campaign, meta-pixel, apptest,
   app). El orden real de carga está en index.html (el comentario de app.js está viejo).
-- **SW único**: `firebase-messaging-sw.js` (CACHE_VERSION v53) — FCM + caché:
+- **SW único**: `firebase-messaging-sw.js` (CACHE_VERSION v54) — FCM + caché:
   `/js/` y `/css/` stale-while-revalidate (deploy llega en la SIGUIENTE carga sin
   bumpear versión), `/app.js` y manifest network-first, API/socket nunca. `user-sw.js`
   es un stub de auto-desregistro (no volver a registrarlo).
@@ -335,7 +342,7 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   deploy que cambia HTML y JS JUNTOS corre UNA carga con HTML nuevo + JS viejo del
   caché SWR (TypeError si el HTML cambió el DOM — casi pasó con el botón del
   reembolso diario). Al cambiar HTML+JS juntos: bumpear `?v` y CACHE_VERSION al
-  mismo número (hoy v53). Cambios de JS solo (sin DOM nuevo) siguen sin necesitar bump.
+  mismo número (hoy v54). Cambios de JS solo (sin DOM nuevo) siguen sin necesitar bump.
 - **FCM**: todo el manejo real (getToken 3 tiers, refresh, register-token) está en el
   INLINE de index.html; `window.sendFcmTokenAfterLogin` del inline pisa a propósito la
   de notifications.js. Firebase config duplicada en index.html Y en el SW (cambiar
@@ -343,7 +350,8 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
 - **Regalos con código** (#103): botón 🎁 de la barra → `#giftCodeModal` (vistas
   canjear / ℹ️ información con estado de app y notificaciones + link a Telegram);
   funciones en `VIP.ui` (`openGiftCodeModal`, `claimGiftCode`, `giftCodeShowView`,
-  `giftInfoEnableNotifs`). `promobonus.js` pinta `#promoBonusCard` (bono % vigente).
+  `giftInfoEnableNotifs`, `claimPendingGift`). `promobonus.js` pinta `#promoBonusCard`
+  (bono % vigente) y `#giftPendingCard` (fichas por reclamar, botón "Reclamar").
 - SPA sin router: `#loginScreen`/`#chatScreen` + modales. Estado de login en globals
   `window._loginMode` etc. Interceptor global de fetch (auth.js) reabre el modal
   obligatorio ante 403 MUST_CHANGE_PASSWORD.
@@ -369,7 +377,7 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
 - Sección Notificaciones: card "🎁 Lote con regalo" + "📤 Lotes enviados" (#103;
   `previewGiftBatch`/`sendGiftBatch`/`genGiftBatchCode`/`loadNotifBatches`/
   `toggleNotifBatchDetail` van por onclick inline). Socket `security_alert` → toast rojo.
-- `admin-sw.js` (v27, scope /adminprivado2026/): network-first no-store para el shell.
+- `admin-sw.js` (v28, scope /adminprivado2026/): network-first no-store para el shell.
   Bumpear `CACHE_VERSION` en cada cambio de admin.js/admin.css.
 - Mensajes `type:'system'` en el chat del panel (`createMessageElement`): `adminOnly:true`
   → VERDE + badge "🔒 INTERNO — el cliente NO lo ve" (el cliente nunca lo recibió);

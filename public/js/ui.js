@@ -591,6 +591,76 @@ VIP.ui = (function () {
         const i = document.getElementById('giftCodeInput'); if (i) i.value = '';
         showModal('giftCodeModal');
         giftCodeShowView('claim');
+        _renderPendingGifts();
+    }
+    // Regalos de FICHAS por tiempo pendientes de RECLAMAR (owner 2026-10-03: no se
+    // acreditan solos; el cliente toca "Reclamar" y recién ahí entran). Misma lista
+    // que la card del inicio (js/promobonus.js).
+    function _fmtGiftLeft(expiresAt) {
+        const ms = new Date(expiresAt).getTime() - Date.now();
+        if (ms <= 0) return 'vencido';
+        const m = Math.floor(ms / 60000), h = Math.floor(m / 60);
+        return h > 0 ? ('vence en ' + h + 'h ' + String(m % 60).padStart(2, '0') + 'm') : ('vence en ' + m + ' min');
+    }
+    function renderPendingGiftCards(gifts, opts) {
+        const compact = !!(opts && opts.compact);
+        return (gifts || []).map((g) => {
+            const monto = Number(g.amount).toLocaleString('es-AR');
+            return '<div data-gift-id="' + _giftEsc(g.batchId) + '" style="background:linear-gradient(135deg,#3b2a00,#7a5a00);border:2px solid #ffd700;border-radius:12px;padding:' + (compact ? '10px 12px' : '12px 14px') + ';margin:' + (compact ? '0 0 10px' : '8px auto') + ';max-width:560px;box-shadow:0 0 16px rgba(255,215,0,0.35);">' +
+                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+                '<span style="font-size:26px;">🎁</span>' +
+                '<div style="flex:1;min-width:140px;">' +
+                '<div style="color:#ffd700;font-weight:900;font-size:' + (compact ? '13.5px' : '15px') + ';">¡Tenés $' + monto + ' de regalo!</div>' +
+                '<div style="color:#fff;font-size:11.5px;margin-top:2px;">' + (g.name ? _giftEsc(g.name) + ' · ' : '') + 'Se acredita al instante. <strong>' + _giftEsc(_fmtGiftLeft(g.expiresAt)) + '</strong>.</div>' +
+                '</div>' +
+                '<button onclick="VIP.ui.claimPendingGift(\'' + _giftEsc(g.batchId) + '\', this)" style="background:linear-gradient(135deg,#d4af37,#ffd700);color:#1a0b2e;border:none;border-radius:10px;padding:10px 14px;font-weight:900;font-size:13px;cursor:pointer;white-space:nowrap;">Reclamar $' + monto + '</button>' +
+                '</div></div>';
+        }).join('');
+    }
+    async function fetchPendingGifts() {
+        if (!VIP.state || !VIP.state.currentToken) return [];
+        try {
+            const r = await fetch(`${VIP.config.API_URL}/api/gift-code/pending`, { headers: { 'Authorization': `Bearer ${VIP.state.currentToken}` } });
+            if (!r.ok) return [];
+            const d = await r.json();
+            return Array.isArray(d && d.gifts) ? d.gifts : [];
+        } catch (_) { return []; }
+    }
+    async function _renderPendingGifts() {
+        const box = document.getElementById('giftPendingBox');
+        if (!box) return;
+        const gifts = await fetchPendingGifts();
+        box.innerHTML = gifts.length
+            ? '<p style="color:#ffd700;font-weight:900;font-size:12.5px;margin:0 0 8px;">🎁 Tenés un regalo para reclamar:</p>' + renderPendingGiftCards(gifts, { compact: true })
+            : '';
+    }
+    async function claimPendingGift(batchId, btn) {
+        if (btn) { btn.disabled = true; btn.textContent = 'Reclamando…'; }
+        let data = {};
+        let ok = false;
+        try {
+            const response = await fetch(`${VIP.config.API_URL}/api/gift-code/claim-pending`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${VIP.state.currentToken}` },
+                body: JSON.stringify({ batchId })
+            });
+            data = await response.json().catch(() => ({}));
+            ok = response.ok && !!data.success;
+        } catch (_) {
+            data = { error: 'Error de conexión. Probá de nuevo.' };
+        }
+        if (ok) {
+            showToast('💰 ¡Regalo acreditado! $' + Number(data.amount).toLocaleString('es-AR') + ' ya están en tu cuenta.', 'success');
+            document.querySelectorAll('[data-gift-id="' + batchId + '"]').forEach((el) => el.remove());
+            try { syncBalance(); } catch (_) {}
+            try { if (VIP.chat && VIP.chat.loadMessages) VIP.chat.loadMessages(); } catch (_) {}
+        } else {
+            showToast(data.error || 'No se pudo reclamar el regalo.', 'error');
+            if (btn) { btn.disabled = false; btn.textContent = 'Reclamar'; }
+        }
+        // Refrescar card del inicio y caja del modal (por si venció / ya se reclamó).
+        try { if (VIP.promoBonus && VIP.promoBonus.loadGifts) VIP.promoBonus.loadGifts(); } catch (_) {}
+        try { _renderPendingGifts(); } catch (_) {}
     }
     // Dos vistas separadas — canjear / información (de dónde salen los
     // códigos + Telegram + estado de app y notificaciones con botones para resolverlo).
@@ -707,7 +777,10 @@ VIP.ui = (function () {
         openGiftCodeModal,
         claimGiftCode,
         giftCodeShowView,
-        giftInfoEnableNotifs
+        giftInfoEnableNotifs,
+        claimPendingGift,
+        fetchPendingGifts,
+        renderPendingGiftCards
     };
 
 })();

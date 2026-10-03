@@ -11,8 +11,22 @@
     let _bonus = null;
     let _tickId = null;
 
+    // Regalos de FICHAS por tiempo pendientes de RECLAMAR (lotes con regalo, owner
+    // 2026-10-03): card dorada en el inicio con el botón "Reclamar" (VIP.ui.claimPendingGift).
+    async function loadGifts() {
+        const card = document.getElementById('giftPendingCard');
+        if (!card || !VIP.ui || !VIP.ui.fetchPendingGifts) return;
+        try {
+            const gifts = await VIP.ui.fetchPendingGifts();
+            if (!gifts.length) { card.style.display = 'none'; card.innerHTML = ''; return; }
+            card.innerHTML = VIP.ui.renderPendingGiftCards(gifts);
+            card.style.display = '';
+        } catch (e) { /* best-effort */ }
+    }
+
     async function load() {
         if (!VIP.state || !VIP.state.currentToken) return;
+        loadGifts();
         try {
             const r = await fetch(VIP.config.API_URL + '/api/promo-bonus/mine', {
                 headers: { 'Authorization': 'Bearer ' + VIP.state.currentToken }
@@ -65,7 +79,7 @@
         _tickId = setInterval(paint, 1000);
     }
 
-    VIP.promoBonus = { load: load };
+    VIP.promoBonus = { load: load, loadGifts: loadGifts };
 
     document.addEventListener('DOMContentLoaded', function () {
         let tries = 0;
