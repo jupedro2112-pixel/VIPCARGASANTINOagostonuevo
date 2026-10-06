@@ -89,6 +89,9 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   saldo, nunca reenvía a ciegas). Si devuelve `ambiguous:true`: NO liberar la reserva,
   NO reintentar, llamar a `_alertMoneyAmbiguous`. ⚠️ `creditUserBalance` (el histórico
   que usan reembolsos/ruleta/fueguito/bonus manual) SÍ reenvía ante HTML/timeout.
+- **Referidos** (#105): la comisión es % sobre el NETWIN y la tasa sale SIEMPRE de
+  `referralTierService.resolveReferralRate(user)` (override > niveles por referidos
+  activos > % plano editable). Nada de premios en plata por cantidad de referidos.
 - **Lotes con regalo** (#103, `NotifBatch` + PromoBonus `sourceRuleCode:'lote'`): el %
   automático se engancha en `/api/admin/deposit` (solo si el agente NO puso bonus) y en
   `hgcashAutoCarga`; una carga = como mucho UN bono automático. Los bonos de lote están

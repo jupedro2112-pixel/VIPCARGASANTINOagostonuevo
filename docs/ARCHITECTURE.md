@@ -38,7 +38,8 @@ El sistema VIPCARGAS:
   **rango** 🥉🥈🥇 por pérdida del mes; el diario se eliminó 2026-07-28 y VOLVIÓ
   2026-08-29 con su propio % por rango), **ruleta diaria**,
   **fueguito** (racha), **bono instalación** (cupón 100% próxima carga; antes $5.000),
-  **referidos** (7% del owner-revenue), **campañas/publicistas** con sub-atribución
+  **referidos** (% sobre el NETWIN de los referidos: plano 3% editable o NIVELES por referidos
+  activos, #105), **campañas/publicistas** con sub-atribución
   por influencer y **lotes de notificaciones con regalo** (% en la carga o fichas, #103).
 - El "saldo real" del jugador vive en JUGAYGANA; VIPCARGAS guarda atribución, bonos,
   reclamos y el registro permanente de transacciones.
@@ -111,7 +112,10 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   publisherAnalyticsService).
 - **Referral**: ReferralEvent (atribución, 1 por referido), ReferralCommission
   (cálculo por período `YYYY-MM`, con liquidación INCREMENTAL/delta —
-  `settledOwnerRevenue`), ReferralPayout (pagos, soporta múltiples por período).
+  `settledOwnerRevenue`; desde #105 `totalOwnerRevenue` guarda el NETWIN, el nombre
+  quedó por compatibilidad), ReferralPayout (pagos, soporta múltiples por período),
+  ReferralMilestoneClaim (solo historial de premios viejos del hermano; acá nunca se
+  crean). Config: `referralRate` (% plano) y `referralMilestones` (niveles).
 
 ### Notificaciones / retención
 - **NotificationRule** (+ Suggestion con approval-gate 48h, + NotificationHistory con
@@ -272,8 +276,23 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   es el candado atómico contra doble cobro; si el crédito falla se borra la reserva;
   ver #96). RefundClaim guarda `tier`. Config admin: `GET/POST /api/admin/refund-tiers`
   (reemplazó a refund-percents).
-- **Referidos**: preview/calculate (delta incremental sobre ledger de payouts) /
-  payout (acredita con `jugayganaService.bonus`). Ver §4 y gotchas.
+- **Referidos** (#105, réplica #168-#175 del hermano): el link es
+  `PUBLIC_BASE_URL/?ref=CODE` (`/linkreferido?ref=` redirige; va ANTES de la vanity
+  `/:code`). La PWA guarda `?ref=` 30 días, lo deja FIJO en el registro
+  (`window._vipRefLocked`, prioridad sobre la pauta) y abre el registro solo si llegó
+  sin sesión. Cliente: `GET /api/referrals/dashboard` (link, tabla por referido con
+  NETWIN del mes en vivo — `_referralNetwinMonth` → `royalty-statistics`, cache 15 min,
+  concurrencia 4, tope 60 — y nivel), popup + card del home + modal + chooser de
+  WhatsApp/Telegram. **Tasa:** `referralTierService.resolveReferralRate(user)` =
+  `referralRateOverride` > niveles por referidos ACTIVOS (`Config['referralMilestones']`:
+  activo = cargas reales acumuladas ≥ `minChargedARS`; defaults 0% / 3→1% / 5→2% /
+  10→3%) > % plano (`Config['referralRate']`, default 3%, cargado al arrancar y cada
+  60 s). **Base de la comisión = NETWIN** (`max(0, total_ggr)`). Cálculo mensual:
+  preview/calculate (delta incremental sobre ledger de payouts) / payout (acredita con
+  `jugayganaService.bonus`). Admin: `GET /api/referrals/admin/activity` (sin JUGAYGANA),
+  `GET /api/admin/referrals/:userId/netwin` (en vivo, tope 80), `GET/POST
+  /api/admin/referral-rate`, `GET/POST /api/admin/referrals/milestones-config`.
+  `POST /api/referrals/milestones/claim` → 410 (sin premios en plata). Ver §4 y gotchas.
 - **Ruleta diaria**: requiere PWA instalada (token FCM standalone) + cliente activo
   (>10 cargas reales/30d). Pick ponderado + **budget pacing** (distribuye el
   presupuesto diario por hora ART; si excede → fuerza SIN PREMIO). Auto-crédito.
@@ -334,7 +353,7 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   auth, socket, chat, ui, refunds, fire, roulette, reviews, promobonus, notifications,
   withdraw, installbonus, notifsurvey, publisherwelcome, campaign, meta-pixel, apptest,
   app). El orden real de carga está en index.html (el comentario de app.js está viejo).
-- **SW único**: `firebase-messaging-sw.js` (CACHE_VERSION v54) — FCM + caché:
+- **SW único**: `firebase-messaging-sw.js` (CACHE_VERSION v55) — FCM + caché:
   `/js/` y `/css/` stale-while-revalidate (deploy llega en la SIGUIENTE carga sin
   bumpear versión), `/app.js` y manifest network-first, API/socket nunca. `user-sw.js`
   es un stub de auto-desregistro (no volver a registrarlo).
@@ -342,7 +361,7 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   deploy que cambia HTML y JS JUNTOS corre UNA carga con HTML nuevo + JS viejo del
   caché SWR (TypeError si el HTML cambió el DOM — casi pasó con el botón del
   reembolso diario). Al cambiar HTML+JS juntos: bumpear `?v` y CACHE_VERSION al
-  mismo número (hoy v54). Cambios de JS solo (sin DOM nuevo) siguen sin necesitar bump.
+  mismo número (hoy v55). Cambios de JS solo (sin DOM nuevo) siguen sin necesitar bump.
 - **FCM**: todo el manejo real (getToken 3 tiers, refresh, register-token) está en el
   INLINE de index.html; `window.sendFcmTokenAfterLogin` del inline pisa a propósito la
   de notifications.js. Firebase config duplicada en index.html Y en el SW (cambiar
@@ -352,6 +371,10 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   funciones en `VIP.ui` (`openGiftCodeModal`, `claimGiftCode`, `giftCodeShowView`,
   `giftInfoEnableNotifs`, `claimPendingGift`). `promobonus.js` pinta `#promoBonusCard`
   (bono % vigente) y `#giftPendingCard` (fichas por reclamar, botón "Reclamar").
+- **Referidos** (#105): `#referralHomeCard`, popup `#referralPromoModal` (imágenes en
+  `/img/referidos-promo-*.jpg`, cooldown 30 min en `localStorage vip_refPromoAt`),
+  `#referralModal` renderizado por `VIP.ui.renderReferralModal`; `.referralRatePct` =
+  % MÁXIMO alcanzable, `.referralMyPct` = % propio.
 - SPA sin router: `#loginScreen`/`#chatScreen` + modales. Estado de login en globals
   `window._loginMode` etc. Interceptor global de fetch (auth.js) reabre el modal
   obligatorio ante 403 MUST_CHANGE_PASSWORD.
@@ -377,7 +400,10 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
 - Sección Notificaciones: card "🎁 Lote con regalo" + "📤 Lotes enviados" (#103;
   `previewGiftBatch`/`sendGiftBatch`/`genGiftBatchCode`/`loadNotifBatches`/
   `toggleNotifBatchDetail` van por onclick inline). Socket `security_alert` → toast rojo.
-- `admin-sw.js` (v28, scope /adminprivado2026/): network-first no-store para el shell.
+- Sección Referidos (#105): actividad y evolución, ranking, niveles de comisión,
+  tabla con filtros, detalle con netwin por referido. Card "🤝 Comisión de referidos"
+  en COMANDOS (`loadReferralRate` desde `loadCommands`).
+- `admin-sw.js` (v29, scope /adminprivado2026/): network-first no-store para el shell.
   Bumpear `CACHE_VERSION` en cada cambio de admin.js/admin.css.
 - Mensajes `type:'system'` en el chat del panel (`createMessageElement`): `adminOnly:true`
   → VERDE + badge "🔒 INTERNO — el cliente NO lo ve" (el cliente nunca lo recibió);
@@ -428,6 +454,9 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   y limpiar el flag después → TOCTOU/doble cobro). Patrón: `findOneAndUpdate` con guard
   del flag (ruleta, bono instalación, fueguito claim-reward) o `create` con índice único
   (reembolsos). Si el crédito falla, revertir la reserva. Ver #96.
+- **Comisión de referidos** → SIEMPRE `referralTierService.resolveReferralRate(user)`
+  (async), nunca `getReferralRateForUser` (sync, solo conoce el % plano). Base = NETWIN.
+  Nada de premios en plata por cantidad de referidos.
 - **Crédito AUTOMÁTICO nuevo a JUGAYGANA = `jugaygana.creditUserBalanceVerified`**
   (nunca reenviar a ciegas). Resultado `ambiguous:true` ⇒ NO liberar la reserva, NO
   reintentar, `_alertMoneyAmbiguous(ctx, userId, username, amount, err)`. Ver #103.
@@ -501,6 +530,12 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   corre la ventana 3 h y le corta el pico nocturno al cliente (WORKLOG #102).
 - **`X-Token` en royalty-statistics** y **`child_user_id` obligatorio** — cambiarlos
   rompe referidos Y reembolsos.
+- **Referidos (#105)**: con los niveles prendidos y los defaults, un referidor con
+  menos de 3 referidos activos cobra 0% (antes 7% fijo). `/linkreferido` tiene que
+  seguir ANTES de `/:code`. El netwin que ve el cliente en el tablero y el que se le
+  paga salen de la MISMA función (`getUserNetwinForDateRange`); no cambiar una sin la
+  otra. El ranking del admin usa netwin CALCULADO (ReferralCommission); el "en vivo"
+  va por endpoint aparte.
 - **`_communityRecommendCard` (roulette.js)**: feature pedida por el owner que nunca
   se conectó — lee `VIP.state.communityLink*` que nadie setea (el wiring real de
   comunidad es `loadCommunity()` inline → `/api/config/community`). Es MEJORA
