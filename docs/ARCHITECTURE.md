@@ -353,7 +353,7 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   auth, socket, chat, ui, refunds, fire, roulette, reviews, promobonus, notifications,
   withdraw, installbonus, notifsurvey, publisherwelcome, campaign, meta-pixel, apptest,
   app). El orden real de carga está en index.html (el comentario de app.js está viejo).
-- **SW único**: `firebase-messaging-sw.js` (CACHE_VERSION v55) — FCM + caché:
+- **SW único**: `firebase-messaging-sw.js` (CACHE_VERSION v56) — FCM + caché:
   `/js/` y `/css/` stale-while-revalidate (deploy llega en la SIGUIENTE carga sin
   bumpear versión), `/app.js` y manifest network-first, API/socket nunca. `user-sw.js`
   es un stub de auto-desregistro (no volver a registrarlo).
@@ -361,7 +361,7 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   deploy que cambia HTML y JS JUNTOS corre UNA carga con HTML nuevo + JS viejo del
   caché SWR (TypeError si el HTML cambió el DOM — casi pasó con el botón del
   reembolso diario). Al cambiar HTML+JS juntos: bumpear `?v` y CACHE_VERSION al
-  mismo número (hoy v55). Cambios de JS solo (sin DOM nuevo) siguen sin necesitar bump.
+  mismo número (hoy v56). Cambios de JS solo (sin DOM nuevo) siguen sin necesitar bump.
 - **FCM**: todo el manejo real (getToken 3 tiers, refresh, register-token) está en el
   INLINE de index.html; `window.sendFcmTokenAfterLogin` del inline pisa a propósito la
   de notifications.js. Firebase config duplicada en index.html Y en el SW (cambiar

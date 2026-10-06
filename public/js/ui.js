@@ -424,7 +424,7 @@ VIP.ui = (function () {
         const tiersOn = lv.enabled !== false && lv.mode === 'tiers' && tiers.length;
         const maxCount = lv.maxCount || (tiers.length ? tiers[tiers.length - 1].count : 10);
         const prog = Math.min(100, Math.round((lv.active || 0) / Math.max(1, maxCount) * 100));
-        const steps = tiers.slice(0, 4).map(t => '<div class="dash-ref-step' + (t.reached ? ' on' : '') + '"><b>' + (t.current ? '⭐' : (t.reached ? '✅' : '🔒')) + '</b>' + t.count + ' activos<br>' + _refPctNum(t.pct) + '</div>').join('');
+        const steps = tiers.slice(0, 4).map(t => '<div class="dash-ref-step' + (t.reached ? ' on' : '') + '"><b>' + (t.current ? '⭐' : (t.reached ? '✅' : '🔒')) + '</b>' + t.count + ' activos → ' + _refPctNum(t.pct) + '</div>').join(''); // una línea por nivel (card compacta)
         const next = lv.nextTier;
         c.innerHTML = '<div class="dash-ref">' +
             '<div class="dash-ref-head"><span style="font-size:18px;">👥</span><span class="dash-ref-title">INVITÁ A TUS AMIGOS · cobrá hasta el ' + _refMaxPct(d) + '</span><button class="dash-ref-cta" onclick="VIP.ui.openReferralModal()">VER NIVELES ›</button></div>' +

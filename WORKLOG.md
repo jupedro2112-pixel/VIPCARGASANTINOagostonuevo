@@ -83,6 +83,10 @@
   y el modal lo reflejan; (5) Panel → Referidos: actividad, ranking, "Ver referidos" con netwin del mes
   en unos segundos; (6) preview del cálculo mensual: la tasa coincide con el nivel y la comisión es
   % × netwin; (7) `/linkreferido?ref=CODE` redirige a `/?ref=CODE`.
+- **Ajuste UI (owner, con captura, mismo día):** la card "INVITÁ A TUS AMIGOS" del home salía a TODO
+  lo ancho (fuera del máximo de 680 px del resto) y muy alta → `#referralHomeCard` con el mismo ancho
+  que las otras cards, paddings/fuentes más chicos, niveles en una sola línea ("🔒 3 activos → 1%") y
+  botón INVITAR más bajo. `?v=56` + SW v56 (CSS y ui.js cambian juntos).
 - **DECISIÓN PENDIENTE DEL OWNER:** confirmar los defaults de niveles (0% con <3 activos) y el 3% plano,
   o ajustarlos desde el panel antes del próximo cálculo mensual.
 
