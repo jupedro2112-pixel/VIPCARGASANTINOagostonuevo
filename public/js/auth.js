@@ -109,9 +109,10 @@ VIP.auth = (function () {
         const attribution = VIP.campaign ? VIP.campaign.getActive() : null;
         // El código de referido solo cuenta si NO vino por una pauta: en el
         // flujo de pauta la campaña es la atribución relevante.
-        const referralCode = (!attribution && referralInput)
-            ? referralInput.value.trim().toUpperCase()
-            : null;
+        // #105: si vino por link de referido, ese código manda (tiene prioridad sobre la pauta).
+        const referralCode = window._vipRefLocked
+            ? String(window._vipRefLocked).toUpperCase()
+            : ((!attribution && referralInput) ? referralInput.value.trim().toUpperCase() : null);
 
         if (btn) { btn.textContent = 'Creando cuenta...'; btn.disabled = true; }
 
@@ -526,6 +527,8 @@ VIP.auth = (function () {
         VIP.refunds.loadRefundStatus();
         VIP.fire.loadFireStatus();
         VIP.ui.loadCanalInformativoUrl();
+        if (VIP.ui.loadReferralHomeCard) VIP.ui.loadReferralHomeCard();   // #105 card INVITÁ A TUS AMIGOS
+        if (VIP.ui.maybeShowReferralPromo) VIP.ui.maybeShowReferralPromo(); // #105 popup (1× por apertura, cooldown 30 min)
         refreshVerifyPhoneBanner();
         if (VIP.appTest && VIP.appTest.maybeShowAppCheck) VIP.appTest.maybeShowAppCheck();
         if (VIP.appTest && VIP.appTest.maybeRunNotifTest) VIP.appTest.maybeRunNotifTest();
@@ -1229,11 +1232,20 @@ VIP.auth = (function () {
         const attribution = VIP.campaign && VIP.campaign.getActive();
 
         if (banner) banner.style.display = attribution ? '' : 'none';
-        if (attribution) {
+        // #105: si vino por link de referido (?ref=), el código queda FIJO y no editable: un
+        // solo invitador por cuenta. Tiene prioridad sobre la atribución de pauta.
+        const lockedRef = window._vipRefLocked || null;
+        const hint = document.getElementById('registerReferralHint');
+        if (lockedRef) {
+            if (referralGroup) referralGroup.style.display = '';
+            if (referralInput) { referralInput.value = lockedRef; referralInput.readOnly = true; referralInput.style.opacity = '.85'; referralInput.style.borderColor = '#d4af37'; }
+            if (hint) { hint.textContent = '🤝 Viniste invitado con este código. Queda vinculado a tu cuenta.'; hint.style.color = '#d4af37'; }
+        } else if (attribution) {
             if (referralGroup) referralGroup.style.display = 'none';
-            if (referralInput) referralInput.value = '';
+            if (referralInput) { referralInput.value = ''; referralInput.readOnly = false; }
         } else {
             if (referralGroup) referralGroup.style.display = '';
+            if (referralInput) referralInput.readOnly = false;
         }
         sendBtn.textContent = '📝 Crear Cuenta';
         sendBtn.onclick = handleRegisterDirect;

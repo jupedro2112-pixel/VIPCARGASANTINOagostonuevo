@@ -5,7 +5,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { User, ReferralCommission, ReferralPayout } = require('../models');
 const referralRevenueService = require('./referralRevenueService');
-const { getReferralRateForUser } = require('../utils/referralRate');
+const referralTierService = require('./referralTierService'); // #171 % por nivel de referidos activos
 const logger = require('../utils/logger');
 
 /**
@@ -111,7 +111,11 @@ async function calculateCommissionsForPeriod(periodKey, options = {}) {
       continue;
     }
 
-    const referralRate = getReferralRateForUser(referrer);
+    // #171: la tasa depende de cuántos referidos ACTIVOS tiene el referidor (niveles editables en
+    // el panel). Se resuelve una vez por referidor y se guarda en cada ReferralCommission.referralRate.
+    const rateInfo = await referralTierService.resolveReferralRate(referrer);
+    const referralRate = rateInfo.rate;
+    logger.info(`[ReferralCalc] tasa ${referrer.username}: ${rateInfo.pct}% (${rateInfo.mode}${rateInfo.active != null ? ', activos=' + rateInfo.active : ''}) period=${periodKey}`);
 
     // ── Load authoritative settlement state from payout history ──────────────
     // ReferralPayout documents are the source of truth for what was already paid.
@@ -372,7 +376,15 @@ async function calculateCommissionsForPeriod(periodKey, options = {}) {
         continue;
       }
 
-      const { totalOwnerRevenue, totalBets, totalWins, totalGgr, providers } = revenueResult;
+      const { totalBets, totalWins, totalGgr, providers } = revenueResult;
+      // #171 (owner 2026-09-29): la comisión se paga sobre el NETWIN del referido (GGR =
+      // apuestas − premios, `total_ggr` de royalty-statistics), que es lo que la app muestra y
+      // promete ("% de la pérdida neta"). Antes se usaba el "owner revenue" (GGR × owner_commission
+      // por proveedor, la parte del agente tras la regalía), que es menor y no coincidía con el
+      // tablero. Se conserva el nombre del campo (totalOwnerRevenue / settledOwnerRevenue) para no
+      // romper el ledger de payouts ni el delta incremental; el breakdown por proveedor sigue
+      // informativo. Netwin negativo (el referido ganó) = base 0, nunca comisión negativa.
+      const totalOwnerRevenue = Math.max(0, Number(totalGgr) || 0);
 
       // ── Incremental settlement: delta calculation ─────────────────────────────
       // Primary source: payout history ledger (paidPayoutsForReferrer, built above).

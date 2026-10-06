@@ -4,7 +4,87 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-03**
+> **Última actualización: 2026-10-06**
+
+## Sesión 2026-10-06
+
+### 105. 🤝 REFERIDOS NUEVOS — réplica completa del repo hermano (#168→#175): link propio, popup y card, tablero en vivo, % plano editable, NIVELES por referidos activos, comisión sobre NETWIN, actividad + ranking del admin
+- **Pedido del owner:** implementar acá TODO el sistema nuevo de referidos de `AUTOREEMBOLSOSjygactivo`
+  (paquete `docs/replicas/referidos-jugaygana/`, commit `96a677e`; sus #168 visibles, #169 % plano,
+  #170 invitar por WhatsApp/Telegram, #171 niveles anti-estafa, #174 actividad, #175 ranking + netwin
+  por referido) EXACTAMENTE como funciona allá. Ambos repos leen el netwin de JUGAYGANA igual, así que
+  el código se copió tal cual; el README del paquete está escrito para el otro hermano (1girox) y sus
+  avisos de "otra plataforma" NO aplican acá.
+- **Diff antes de pisar (pedido explícito):** `referralController.js`, `referralCalculationService.js`,
+  `referralRoutes.js` y `referralRate.js` de acá eran versiones VIEJAS del paquete — el diff solo
+  mostró agregados del paquete, **ningún cambio local propio** → se reemplazaron enteros.
+- **⚠️ CAMBIOS DE PRODUCTO que trae (decisiones del hermano, replicadas tal cual):**
+  1. **La comisión se calcula sobre el NETWIN del referido** (`max(0, total_ggr)` = apuestas − premios),
+     no sobre el "owner revenue" (GGR × comisión del agente por proveedor, menor). El campo
+     `totalOwnerRevenue`/`settledOwnerRevenue` conserva el nombre por el ledger de payouts (delta
+     incremental intacto). Efecto: el próximo cálculo de un período ya liquidado con la base vieja paga
+     la DIFERENCIA (netwin − liquidado); la comisión de ahora en más es mayor que antes.
+  2. **El % ya NO es 7% fijo.** `Config['referralRate']` (plano, default **3%**, editable en COMANDOS) y,
+     por encima, **NIVELES por referidos ACTIVOS** (`Config['referralMilestones']`, defaults: activo =
+     cargó ≥ $3.000 reales acumulados; <3 activos → **0%**; 3 → 1%; 5 → 2%; 10 → 3%; editable en la
+     sección Referidos; `enabled:true` por default). Prioridad: `referralRateOverride` del usuario >
+     niveles (si están prendidos) > % plano. **Con los defaults, un referidor con menos de 3 referidos
+     activos cobra 0%** (antes cobraba 7%): si el owner no quiere eso, apagar los niveles en el panel
+     (queda el 3% plano) o subir `basePct`.
+  3. **Nada de premios en plata por cantidad de referidos** (el hermano los tuvo y los sacó por estafas
+     con cuentas falsas): el premio es el % por nivel. `POST /api/referrals/milestones/claim` → 410.
+- **Backend:** `src/utils/referralRate.js` (tasa global en memoria + `set/getGlobalReferralRate`),
+  `src/services/referralTierService.js` NUEVO (`resolveReferralRate(user)`, `depositsByReferred`,
+  `levelForCount`, `NON_BANK_SOURCES` — ya incluye `notif_batch`/`notif_batch_auto`),
+  `src/models/ReferralMilestoneClaim.js` NUEVO (solo historial; se registra), `referralCalculationService`
+  (tasa por `resolveReferralRate` + base NETWIN), `referralController` (link por dominio propio,
+  `adminGetReferralActivity` #174, detalle con cargas/netwin histórico #175), `referralRoutes`
+  (`GET /api/referrals/admin/activity`). `server.js`: requires; `GET /linkreferido?ref=` → `/?ref=`
+  (antes de la vanity `/:code`, si no se la comía el matcher de campañas); `_loadReferralRateFromConfig`
+  al arrancar (en `initializeData`, tras `connectDB`) y cada 60 s; `GET/POST /api/admin/referral-rate`;
+  bloque "#105 REFERIDOS": `GET /api/referrals/dashboard` (tablero del cliente: link, totales, tabla por
+  referido con NETWIN del mes en vivo — `_referralNetwinMonth` via `referralRevenueService.
+  getUserNetwinForDateRange` + `resolveJugayganaUserId`, cache 15 min, concurrencia 4, tope 60 —, nivel y
+  tiers), `GET/POST /api/admin/referrals/milestones-config`, `GET /api/admin/referrals/:userId/netwin`
+  (tope 80). Todo DESPUÉS de `const authMiddleware` (TDZ), antes del `app.use('/api/referrals')`.
+- **Adaptaciones respecto del paquete:** dominio del link = `PUBLIC_BASE_URL` (default
+  `https://vipcargas.com`) o el host del request (`_referralLinkFor` y `referralBaseUrl`; acá no existe
+  `_publicBaseUrlFromRequest` ni `_loadAiConfigIntoService`). Fallbacks `autoreembolsos.com` →
+  `vipcargas.com`. Los textos "JUGAYGANA" del panel se dejaron (acá también es JUGAYGANA). El punto 5
+  del pedido (fechas `epoch_s` a royalty-statistics) **ya estaba hecho acá** (#102): sin cambios.
+- **Panel (admin-sw v29):** card "🤝 Comisión de referidos" (% plano) en COMANDOS (se carga en
+  `loadCommands`, solo admin general); sección Referidos REEMPLAZADA entera: "📈 Actividad y evolución"
+  (totales, ventanas 7/30 d vs. anterior, serie diaria, mes a mes, veredicto, distribución por nivel),
+  "🏆 Mejores referidores" (ranking ordenable), cálculo/pago mensual, "🏆 Niveles de comisión" (editor),
+  tabla de referidores con filtros (todos/pendientes/fallidos/con activos/nuevos 30 d), detalle con
+  cargas por referido + netwin del mes en vivo + netwin calculado, pagos, auditoría. Bloque de admin.js
+  reemplazado entero (mismos nombres de función en los onclick; nuevas: `loadReferralActivity`,
+  `renderReferralRanking`, `loadReferralDetailNetwin`, `loadReferralMilestones`, `saveReferralMilestones`,
+  `addRefMsTier`, `loadReferralRate`, `saveReferralRate`).
+- **PWA (`?v=55`, SW v55):** CSS de referidos; `#registerReferralHint`; card `#referralHomeCard` en el
+  home (nivel + barra + INVITAR AHORA); popup `#referralPromoModal` (arte en `public/img/referidos-promo-
+  top.jpg` y `-bottom.jpg`, 1× por apertura con cooldown 30 min en localStorage, `?refpromo=1` lo
+  fuerza, espera si hay otro modal abierto); modal `#referralModal` reescrito (link + INVITAR, tiles,
+  tabla MIS REFERIDOS con pérdida neta y comisión en vivo, "TU NIVEL DE COMISIÓN"); bloque de ui.js
+  reemplazado (`fetchReferralDashboard` cache 60 s, `shareReferralLink` = copia + chooser WhatsApp/
+  Telegram/share nativo/copiar, `maybeShowReferralPromo`, `loadReferralHomeCard`…); app.js: `?ref=` se
+  guarda 30 días (`localStorage vip_ref`), queda FIJO en el registro (`window._vipRefLocked`) y, si
+  llegó por el link sin sesión, el registro se abre solo; auth.js: el código fijo tiene prioridad sobre
+  la atribución de pauta (en el modal y en el POST de registro) + hooks en `initializeSession`.
+- **Validado:** `node --check` OK en todo (server.js, 6 archivos de src, admin.js, ui.js, app.js,
+  auth.js, ambos SW); HTML del panel (623/623 `<div>`) y de la PWA (381/381) balanceados; ids del DOM y
+  handlers de onclick cruzados; `referralTierService` probado en aislamiento (defaults, niveles, formato
+  viejo, dedup). Sin runtime (sin node_modules) y SIN revisión adversarial esta vez (el código es el
+  mismo que corre en el hermano; la adaptación fue mínima). **Back necesita redeploy.**
+- **PROBAR tras deploy:** (1) abrir la app logueado → popup "INVITÁ A TUS AMIGOS · hasta el 3%" →
+  Invitar copia el link y abre el chooser; (2) abrir `/?ref=CODE` en otro celular sin sesión → se abre
+  solo el registro con el código fijo → registrarse → aparece en el modal del invitador; (3) el referido
+  carga ≥ $3.000 → sube "activos" y la barra; (4) COMANDOS → cambiar el % plano y los niveles → el popup
+  y el modal lo reflejan; (5) Panel → Referidos: actividad, ranking, "Ver referidos" con netwin del mes
+  en unos segundos; (6) preview del cálculo mensual: la tasa coincide con el nivel y la comisión es
+  % × netwin; (7) `/linkreferido?ref=CODE` redirige a `/?ref=CODE`.
+- **DECISIÓN PENDIENTE DEL OWNER:** confirmar los defaults de niveles (0% con <3 activos) y el 3% plano,
+  o ajustarlos desde el panel antes del próximo cálculo mensual.
 
 ## Sesión 2026-10-03
 
