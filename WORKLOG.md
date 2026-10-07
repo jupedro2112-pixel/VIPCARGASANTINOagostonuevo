@@ -4,7 +4,51 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-06**
+> **Última actualización: 2026-10-07**
+
+## Sesión 2026-10-07
+
+### 106. hgcash desde el PANEL: credenciales (token + secreto) cifradas y reenvío de avisos a otras páginas — espec `AUTOGIROXcompartido/docs/ESPEC-HGCASH-PANEL.md` (#320 + #326 de allá), aplicada entera
+- **Pedido del owner:** aplicar la espec tal cual, bloque por bloque, sin duplicar lo que ya estuviera.
+  Nada estaba aplicado acá (el fan-out #94 era la versión vieja con una sola URL por env) → se
+  aplicaron los 6 bloques.
+- **Credenciales desde el panel (#320):** card "🔐 Cuenta hgcash conectada" en COMANDOS → Banco
+  automático (solo admin general): token de API (`cash_…`) + secreto del webhook, guardados CIFRADOS
+  (AES-256-GCM, clave = sha256(`JWT_SECRET` + sal fija)) en `Config['hgcashCredentials']`; cada
+  instancia los carga a los 8 s del arranque y cada 60 s (`_loadHgcashCredentials`). **Panel > SSM**:
+  `hgcashService.getToken()` devuelve el override del panel y cae a `HGCASH_API_TOKEN`
+  (`setTokenOverride`/`getTokenSource` nuevos; `getAccounts(withToken)` prueba un token antes de
+  guardarlo). El webhook valida la firma con el secreto del panel **o** el de SSM
+  (`_hgcashWebhookSecrets`) → cambiar de cuenta no pierde avisos; el rechazo loguea ip/fwdBy/UA/id/monto.
+  Al guardar un token se limpia `Config['hgcash'].accountId` (se resuelve con la cuenta nueva, #53).
+  Endpoints `GET/POST/DELETE /api/admin/hgcash/credentials`; `secretConfigured` del GET de config ahora
+  contempla panel o SSM. ⚠️ Si cambia `JWT_SECRET`, lo guardado no se descifra → se usa SSM y la card avisa.
+- **Reenvío a otras páginas (#326):** `_fanoutHgcashWebhook` reescrito: destinos desde
+  `Config['hgcashFanout'].urls` (hasta 5; si el Config existe manda el panel, lista vacía = no reenviar;
+  si no existe vale `HGCASH_FANOUT_URL` como antes), cache 30 s, validación de URL (https, dominio
+  público, sin credenciales; dominio pelado → `/api/hgcash/webhook`), anti-círculo (un aviso que llega
+  con `X-Forwarded-By` no se reenvía; nunca a la URL propia = `PUBLIC_BASE_URL/api/hgcash/webhook`),
+  stats por destino en memoria (`_hgcashFanoutStats`: ok/fail/último resultado). Endpoints
+  `GET/POST/DELETE /api/admin/hgcash/fanout`. Card "🔁 Reenviar los avisos de hgcash a otras páginas"
+  con el último resultado por destino.
+- **Adaptaciones a este repo:** `getPublicBaseUrl()` no existe → `PUBLIC_BASE_URL` (const, default
+  vipcargas.com); `Config.set()` de acá pasa la key a minúsculas y `getConfig` busca exacta → se usa
+  `setConfig(HGCASH_FANOUT_KEY, …)` para guardar el reenvío. Todo lo demás, textual.
+- **Panel:** las 2 cards dentro del form "Banco automático" (antes del botón de movimientos), funciones
+  `loadHgcashCredentials/saveHgcashCredentials/clearHgcashCredentials` y
+  `loadHgcashFanout/saveHgcashFanout/clearHgcashFanout` (+ `_hgcashFanoutRender`), llamadas desde
+  `loadHgcashConfig()`. `admin-sw.js` v29 → **v30**.
+- **Validado:** `node --check` OK (server.js, hgcashService.js, admin.js, admin-sw.js); HTML del panel
+  632/632 `<div>`; cifrado/descifrado probado en aislamiento (roundtrip, clave distinta falla,
+  normalización y rechazo de URLs). Sin runtime. **Back necesita redeploy.**
+- **PROBAR tras deploy:** (1) COMANDOS → Banco automático: la card dice "Token en uso: AWS (SSM)" y
+  "Secreto: AWS (SSM)"; (2) pegar un token inválido → "hgcash rechazó ese token" y no cambia nada;
+  token válido → lista las cuentas y el saldo hgcash del panel se actualiza; la card pasa a "PANEL";
+  (3) carga real con la cuenta nueva → el webhook entra (firma con el secreto nuevo) y la auto-carga
+  acredita; (4) "Volver a usar AWS (SSM)" → la card vuelve a SSM; (5) reenvío: cargar la URL de la
+  otra página → tras una transferencia real la card muestra "✅ último reenvío OK" y el movimiento
+  aparece en la otra página; lista vacía → "Sin reenvío"; (6) un aviso reenviado que llega acá
+  (`X-Forwarded-By`) no se vuelve a reenviar.
 
 ## Sesión 2026-10-06
 

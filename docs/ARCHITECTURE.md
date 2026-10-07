@@ -233,16 +233,24 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   bonus falla → alerta adminOnly). Consume PromoBonus vigente y movimiento hgcash
   pendiente del mismo monto (`hgcashConsumeOnManualDeposit`). Mensajes `/sys_deposit*`,
   `/sys_reminder`, `/sys_install_app`, `/sys_recover_100`.
-- **AUTO-CARGA hgcash** (`POST /api/hgcash/webhook`, firma HMAC sobre rawBody,
-  fail-closed en prod): guarda BankMovement → matching contra Comprobantes por
+- **AUTO-CARGA hgcash** (`POST /api/hgcash/webhook`, firma HMAC sobre rawBody con el
+  secreto del PANEL **o** el de SSM — `_hgcashWebhookSecrets`, #106 —, fail-closed en prod): guarda BankMovement → matching contra Comprobantes por
   monto + (N° operación==coelsa/externalID, o nombre de origen + destino consistente)
   dentro de una ventana (60min desde comprobante / 10min desde movimiento). Ambigüedad
   → NO carga. `hgcashAutoCarga`: claims atómicos de movimiento y comprobante → modo
   sombra o real → **mínimo $2.000** (menor → needs_review + aviso) → candado
   HgcashCharge por coelsa → guard anti-duplicado (misma carga <8min → needs_review) →
   `depositToUser` → Transaction + mensaje + SLA. Fallo → reintentable hasta 3 veces.
-  **Fan-out** (#94): reenvía el webhook crudo+firma a autoreembolsos.com
-  (`HGCASH_FANOUT_URL`, 'off' para apagar).
+  **Fan-out** (#94/#106): reenvía el webhook crudo+firma a las otras páginas que comparten
+  la cuenta hgcash. Destinos desde el panel (`Config['hgcashFanout'].urls`, hasta 5, cache
+  30 s; si el Config existe manda el panel) o, sin config, `HGCASH_FANOUT_URL` ('off' para
+  apagar). Anti-círculo: lo que llega con `X-Forwarded-By` no se reenvía; nunca a la URL
+  propia. Stats por destino en memoria (`GET /api/admin/hgcash/fanout`).
+  **Credenciales hgcash desde el panel** (#106): `Config['hgcashCredentials']` cifrado
+  (AES-256-GCM, clave derivada de `JWT_SECRET`); `hgcashService.getToken()` = override del
+  panel > `HGCASH_API_TOKEN`; se cargan a los 8 s del arranque y cada 60 s. `GET/POST/
+  DELETE /api/admin/hgcash/credentials` (el POST prueba el token con `getAccounts(token)`
+  y limpia el `accountId` cacheado).
 - **Retiro self-service**: `POST /api/withdrawal/request` — exige phoneVerified, lock
   anti-doble, chequeo de saldo (UX), dedup 10min → crea PendingPayout
   (`deductAtPay:true`, SIN descontar) → mueve el chat a Pagos. El AGENTE confirma:
@@ -403,7 +411,9 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
 - Sección Referidos (#105): actividad y evolución, ranking, niveles de comisión,
   tabla con filtros, detalle con netwin por referido. Card "🤝 Comisión de referidos"
   en COMANDOS (`loadReferralRate` desde `loadCommands`).
-- `admin-sw.js` (v29, scope /adminprivado2026/): network-first no-store para el shell.
+- COMANDOS → Banco automático (#106): cards "🔐 Cuenta hgcash conectada" (token + secreto)
+  y "🔁 Reenviar los avisos de hgcash a otras páginas"; se cargan desde `loadHgcashConfig`.
+- `admin-sw.js` (v30, scope /adminprivado2026/): network-first no-store para el shell.
   Bumpear `CACHE_VERSION` en cada cambio de admin.js/admin.css.
 - Mensajes `type:'system'` en el chat del panel (`createMessageElement`): `adminOnly:true`
   → VERDE + badge "🔒 INTERNO — el cliente NO lo ve" (el cliente nunca lo recibió);
@@ -528,6 +538,11 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `Config['hgcashAppBonus']` acá es SOLO el tope del % de lote (no hay bono app).
 - **Fechas a royalty-statistics en epoch segundos ART** (no texto): mandar `YYYY-MM-DD`
   corre la ventana 3 h y le corta el pico nocturno al cliente (WORKLOG #102).
+- **hgcash (#106)**: el token/secreto vigentes pueden venir del PANEL, no solo de SSM —
+  al diagnosticar "pago automático no configurado" mirar la card, no solo SSM. Si cambia
+  `JWT_SECRET` las credenciales del panel dejan de descifrarse (cae a SSM, la card avisa).
+  `Config.set()` pasa la key a minúsculas; `getConfig` busca exacta → para claves camelCase
+  usar `setConfig`, no `Config.set`.
 - **`X-Token` en royalty-statistics** y **`child_user_id` obligatorio** — cambiarlos
   rompe referidos Y reembolsos.
 - **Referidos (#105)**: con los niveles prendidos y los defaults, un referidor con
