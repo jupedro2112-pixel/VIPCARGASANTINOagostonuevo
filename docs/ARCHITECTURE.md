@@ -251,6 +251,10 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   panel > `HGCASH_API_TOKEN`; se cargan a los 8 s del arranque y cada 60 s. `GET/POST/
   DELETE /api/admin/hgcash/credentials` (el POST prueba el token con `getAccounts(token)`
   y limpia el `accountId` cacheado).
+- **Webhook hgcash — secreto exclusivo (#107, 2026-10-13):** si hay secreto cargado en el panel,
+  `_hgcashWebhookSecrets()` devuelve SOLO ese: el `HGCASH_WEBHOOK_SECRET` de SSM deja de valer y
+  los avisos de la cuenta hgcash vieja se rechazan. Sin secreto en el panel vale el de SSM. ⚠️ Si
+  las dos cuentas comparten usuario/secreto de hgcash esto no alcanza (no hay filtro por CBU destino).
 - **Retiro self-service**: `POST /api/withdrawal/request` — exige phoneVerified, lock
   anti-doble, chequeo de saldo (UX), dedup 10min → crea PendingPayout
   (`deductAtPay:true`, SIN descontar) → mueve el chat a Pagos. El AGENTE confirma:
