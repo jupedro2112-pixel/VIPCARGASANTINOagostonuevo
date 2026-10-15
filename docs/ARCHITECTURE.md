@@ -272,10 +272,13 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   `canClaimDailyRefund` decide por `periodKey daily:YYYY-MM-DD` + claim de hoy ART;
   semanal: lunes/martes; mensual: desde día 7), NETWIN real de
   `referralRevenueService.getUserNetwinForDateRange`. El **% sale del RANGO** del
-  cliente (`Config['refundTiers']`, editable panel→COMANDOS, solo admin general): cada
-  rango tiene `percent` (semanal/mensual) y `dailyPercent` (diario); defaults 🥉 bronce
-  hasta $30.000 = 3%/3%, 🥈 plata hasta $100.000 = 5%/5%, 🥇 oro = 10%/10% (config
-  guardada sin `dailyPercent` cae al default). El rango se calcula sobre la pérdida
+  cliente (`Config['refundTiers']`, editable panel→COMANDOS, solo admin general): **#108
+  (réplica #163 del gemelo): cada rango tiene su % por TIPO** `{ daily, weekly, monthly }`
+  (`computeRefundTier(loss, tiers, type)` → `percent` del tipo + `pcts` con los tres; alias
+  `dailyPercent`); defaults 🥉 bronce hasta $30.000 = 3/3/3, 🥈 plata hasta $100.000 = 5/5/5,
+  🥇 oro = 10/10/10. La config vieja `{percent, dailyPercent}` se mapea sola (daily =
+  dailyPercent, weekly = monthly = percent). `/api/refunds/status` devuelve `tier.pcts` y el
+  `percentage` de cada tipo; la PWA muestra "D/S/M%". El rango se calcula sobre la pérdida
   NETWIN mensual: el MENSUAL usa el netwin del propio mes reembolsado; SEMANAL y DIARIO
   usan el mes al que pertenece el INICIO del período (lunes de la semana / el día de
   ayer) — helper `refundTierRangeForPeriodStart`: mes en curso a hoy, o el mes anterior
@@ -539,7 +542,21 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   (un 504 con la carga ya hecha = el agente la repite).
   El bloque "ROI" de la carga manual marca usado el PromoBonus activo cuando el agente
   carga con bonus: con `_loteClaim` se saltea (si no, quemaría un bono "todas las cargas").
-  `Config['hgcashAppBonus']` acá es SOLO el tope del % de lote (no hay bono app).
+  **#108: BONO AUTOMÁTICO APP en la carga hgcash** (réplica #110/#111/#164 del gemelo):
+  `_hgcashApplyAppBonus(user, amount, preBalance)` corre en `hgcashAutoCarga` ANTES del lote
+  (nunca se suman): con app instalada + notifs (`_rouletteHasAppInstalled`) da el 100% de
+  PRIMERA carga (consume el cupón `installBonus100Pending`, o lo otorga si nunca lo reclamó y el
+  dispositivo está libre — `_installBonusDeviceFree`; tope `firstCapARS` + `firstExcessPct` del
+  excedente, `_hgcashFirstBonusAmount`) o `allPct` en todas las cargas hasta
+  `HGCASH_APP_BONUS_20_UNTIL` (fija en código, 2026-08-31 → hoy no aplica). Crédito por
+  `creditUserBalanceVerified` (ambiguo = cupón NO se devuelve + 🛑; fallo limpio = cupón vuelve).
+  Sin app: aviso `/sys_deposit_no_app_20` (editable, vaciarlo lo apaga). Panel: COMANDOS →
+  "🎁 Bonos automáticos hgcash" (`GET/POST /api/admin/hgcash/app-bonus`, admin general). La
+  misma config (`Config['hgcashAppBonus']`) sigue siendo el tope del % de lote.
+- **Soporte del LOGIN (#108, réplica #153):** `GET /api/config/soporte-vip` cae a
+  `communityConfig.supportUrl` (Telegram) si la card está vacía; la card vive en COMANDOS
+  (antes al final de SMS Masivo). La PWA ya no tiene el `wa.link` fijo: sin URL el botón avisa
+  y el 💬 de la barra (`#topbarSupportBtn`) queda oculto hasta tener URL.
 - **Fechas a royalty-statistics en epoch segundos ART** (no texto): mandar `YYYY-MM-DD`
   corre la ventana 3 h y le corta el pico nocturno al cliente (WORKLOG #102).
 - **hgcash (#106)**: el token/secreto vigentes pueden venir del PANEL, no solo de SSM —

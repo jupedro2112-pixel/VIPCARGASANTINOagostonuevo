@@ -5155,10 +5155,12 @@ async function loadCBUConfig() {
     loadCanalUrlConfig();
     // Cargar la config de la Comunidad (Telegram)
     loadCommunityConfig();
+    loadSoporteVip(); // #108 soporte del login (card movida a COMANDOS)
     // Cargar la config del banco automático (hgcash)
     loadHgcashConfig();
     // Cargar los rangos de reembolso (solo admin general)
     loadRefundTiers();
+    loadHgAppBonus(); // #108 bonos automáticos hgcash
     loadReferralRate(); // #105 % plano de comisión de referidos (solo admin general)
     // Cargar los premios del fueguito (solo admin general)
     loadFireMilestones();
@@ -5183,13 +5185,12 @@ async function loadRefundTiers() {
         const t = j.tiers || {};
         const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
         set('tierBronceUpTo', t.bronce && t.bronce.upTo);
-        set('tierBroncePct', t.bronce && t.bronce.percent);
-        set('tierBronceDailyPct', t.bronce && t.bronce.dailyPercent);
         set('tierPlataUpTo', t.plata && t.plata.upTo);
-        set('tierPlataPct', t.plata && t.plata.percent);
-        set('tierPlataDailyPct', t.plata && t.plata.dailyPercent);
-        set('tierOroPct', t.oro && t.oro.percent);
-        set('tierOroDailyPct', t.oro && t.oro.dailyPercent);
+        // #163: un % por tipo de reembolso y por rango (compat: `percent` viejo = los tres).
+        ['Bronce', 'Plata', 'Oro'].forEach(k => {
+            const tt = t[k.toLowerCase()] || {};
+            ['daily', 'weekly', 'monthly'].forEach(ty => set('tier' + k + ty.charAt(0).toUpperCase() + ty.slice(1) + 'Pct', tt[ty] != null ? tt[ty] : tt.percent));
+        });
     } catch (e) {
         console.error('Error cargando rangos de reembolso:', e);
     }
@@ -5201,16 +5202,11 @@ async function saveRefundTiers() {
         const el = document.getElementById(id);
         return el ? el.value : '';
     };
-    const body = {
-        bronceUpTo: num('tierBronceUpTo'),
-        broncePct: num('tierBroncePct'),
-        bronceDailyPct: num('tierBronceDailyPct'),
-        plataUpTo: num('tierPlataUpTo'),
-        plataPct: num('tierPlataPct'),
-        plataDailyPct: num('tierPlataDailyPct'),
-        oroPct: num('tierOroPct'),
-        oroDailyPct: num('tierOroDailyPct')
-    };
+    const body = { bronceUpTo: num('tierBronceUpTo'), plataUpTo: num('tierPlataUpTo') };
+    ['bronce', 'plata', 'oro'].forEach(k => ['daily', 'weekly', 'monthly'].forEach(ty => {
+        const T = ty.charAt(0).toUpperCase() + ty.slice(1);
+        body[k + T + 'Pct'] = num('tier' + k.charAt(0).toUpperCase() + k.slice(1) + T + 'Pct');
+    }));
     try {
         const r = await authFetch('/api/admin/refund-tiers', {
             method: 'POST',
@@ -5223,13 +5219,87 @@ async function saveRefundTiers() {
         }
         const t = j.tiers || {};
         const tb = t.bronce || {}, tp = t.plata || {}, to = t.oro || {};
+        const f = (x) => `D ${x.daily}% · S ${x.weekly}% · M ${x.monthly}%`;
         if (msg) {
             msg.style.color = '#00c853';
-            msg.textContent = `✅ Guardado: 🥉 hasta $${tb.upTo} = ${tb.percent}% (diario ${tb.dailyPercent}%) · 🥈 hasta $${tp.upTo} = ${tp.percent}% (diario ${tp.dailyPercent}%) · 🥇 ${to.percent}% (diario ${to.dailyPercent}%)`;
+            msg.textContent = `✅ Guardado: 🥉 hasta $${tb.upTo} (${f(tb)}) · 🥈 hasta $${tp.upTo} (${f(tp)}) · 🥇 (${f(to)})`;
         }
         showToast('Rangos de reembolso actualizados', 'success');
     } catch (e) {
         if (msg) { msg.style.color = '#ff6b6b'; msg.textContent = 'Error de conexión.'; }
+    }
+}
+
+// Interruptores y % del bono de primera carga y del bono en todas las cargas
+// automáticas. Config['hgcashAppBonus'] en el backend.
+async function loadHgAppBonus() {
+    const form = document.getElementById('hgAppBonusForm');
+    const header = document.getElementById('hgAppBonusHeader');
+    try {
+        const r = await authFetch('/api/admin/hgcash/app-bonus');
+        if (!r.ok) {
+            // Sólo admin general: si no, se oculta la card entera.
+            if (form) form.style.display = 'none';
+            if (header) header.style.display = 'none';
+            return;
+        }
+        if (form) form.style.display = '';
+        if (header) header.style.display = '';
+        const j = await r.json();
+        const c = j.config || {};
+        const fe = document.getElementById('hgAppBonusFirstEnabled');
+        const fp = document.getElementById('hgAppBonusFirstPct');
+        const ae = document.getElementById('hgAppBonusAllEnabled');
+        const ap = document.getElementById('hgAppBonusAllPct');
+        if (fe) fe.checked = c.firstEnabled !== false;
+        if (fp) fp.value = c.firstPct || 100;
+        const fc = document.getElementById('hgAppBonusFirstCap'); if (fc) fc.value = c.firstCapARS != null ? c.firstCapARS : 5000;
+        const fx = document.getElementById('hgAppBonusFirstExcess'); if (fx) fx.value = c.firstExcessPct != null ? c.firstExcessPct : 20;
+        if (ae) ae.checked = c.allEnabled !== false;
+        if (ap) ap.value = c.allPct || 20;
+        const until = document.getElementById('hgAppBonusUntil');
+        if (until && j.promo20Until) {
+            const d = new Date(j.promo20Until);
+            until.textContent = d.toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' (hora argentina)';
+        }
+    } catch (e) {
+        console.error('Error cargando bonos hgcash:', e);
+    }
+}
+
+async function saveHgAppBonus() {
+    const msg = document.getElementById('hgAppBonusMsg');
+    const pct = (id, fallback) => {
+        const el = document.getElementById(id);
+        const n = el ? Math.round(Number(el.value)) : NaN;
+        return Number.isFinite(n) && n >= 1 && n <= 200 ? n : fallback;
+    };
+    const body = {
+        firstEnabled: !!(document.getElementById('hgAppBonusFirstEnabled') || {}).checked,
+        firstPct: pct('hgAppBonusFirstPct', 100),
+        firstCapARS: Math.max(0, Math.round(Number((document.getElementById('hgAppBonusFirstCap') || {}).value) || 0)),
+        firstExcessPct: Math.max(0, Math.min(200, Math.round(Number((document.getElementById('hgAppBonusFirstExcess') || {}).value) || 0))),
+        allEnabled: !!(document.getElementById('hgAppBonusAllEnabled') || {}).checked,
+        allPct: pct('hgAppBonusAllPct', 20)
+    };
+    try {
+        const r = await authFetch('/api/admin/hgcash/app-bonus', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || 'Error al guardar');
+        const c = j.config || body;
+        if (msg) {
+            msg.style.color = '#28a745';
+            msg.textContent = `✅ Guardado — Primera carga: ${c.firstEnabled ? c.firstPct + '%' + (c.firstCapARS > 0 ? ' hasta $' + Number(c.firstCapARS).toLocaleString('es-AR') + ' + ' + c.firstExcessPct + '% del excedente' : '') : 'APAGADO'} · Todas las cargas: ${c.allEnabled ? c.allPct + '%' : 'APAGADO'}`;
+        }
+        showToast('Bonos automáticos guardados', 'success');
+        loadHgAppBonus();
+    } catch (e) {
+        if (msg) { msg.style.color = '#dc3545'; msg.textContent = '❌ ' + e.message; }
+        showToast(e.message || 'Error al guardar bonos', 'error');
     }
 }
 

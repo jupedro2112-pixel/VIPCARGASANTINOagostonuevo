@@ -2093,9 +2093,14 @@ async function hgcashAutoCarga({ movement, comprobante, mode }) {
     // el resultado lo cierra _finishLoteBonusCredit (fallo LIMPIO → se libera + nota;
     // AMBIGUO → queda consumido + alerta 🛑, nunca se reintenta). Nunca tira: si algo
     // falla, la carga sigue como si no hubiera bono.
+    // #108: BONO AUTOMÁTICO por app + notificaciones (100% primera carga / 20% todas) — corre
+    // primero; el lote sólo si no hubo bono app (nunca se suman entre sí).
     let appBonus = { applied: false, amount: 0, pct: 0, kind: null };
+    try { appBonus = await _hgcashApplyAppBonus(user, Number(amount), null); }
+    catch (abErr) { logger.error(`[hgcash-bonus] hook falló user=${user.username}: ${abErr.message}`); }
+    if (appBonus.applied) { try { await Transaction.updateOne({ id: _hgDepositTxId }, { $set: { bonus: appBonus.amount } }); } catch (_) {} }
     try {
-      const _lcH = await claimAutoPromoPercent(user, 'auto-hgcash');
+      const _lcH = appBonus.applied ? { claimed: false } : await claimAutoPromoPercent(user, 'auto-hgcash');
       if (_lcH.claimed) {
         const _lcCfg = await getHgcashAppBonusConfig();
         const _lcAmt = _loteBonusAmount(Number(amount), _lcH.pct, _lcCfg); // tope del % de lote
@@ -2145,6 +2150,32 @@ async function hgcashAutoCarga({ movement, comprobante, mode }) {
     const uSock = connectedUsers.get(user.id);
     if (uSock && newBalance !== null) uSock.emit('balance_updated', { balance: newBalance });
 
+    // Cargó SIN app instalada o sin notificaciones → esta carga fue sin bono.
+    // Aviso editable desde COMANDOS (/sys_deposit_no_app_20; vaciarlo lo apaga).
+    // noticeOk ya contempla que haya algún bono PRENDIDO y (para el 20%) vigente
+    // — si están apagados desde el panel, no se promete nada que no exista.
+    if (appBonus.noticeOk) {
+      try {
+        const noAppContent = await renderSystemCommand(
+          '/sys_deposit_no_app_20',
+          '🎁 {username}, esta carga entró SIN BONO. 😮\n\n📲 Instalá la app y activá las notificaciones para recibir:\n• 💥 {pctPrimera}% EXTRA en tu primera carga\n• 🔥 {pctTodas}% EXTRA en TODAS tus cargas automáticas (hasta el 31/08)\n\nSe acreditan SOLOS, sin pedir nada. 🚀\n📲 Tocá "📱 Instalar App" o, en el menú del navegador, "Agregar a pantalla de inicio".',
+          { username: user.username, pctPrimera: appBonus.cfg.firstPct, pctTodas: appBonus.cfg.allPct }
+        );
+        if (noAppContent) {
+          const noAppMsg = await Message.create({
+            id: uuidv4(), senderId: 'admin', senderUsername: 'Sistema', senderRole: 'admin',
+            receiverId: user.id, receiverRole: 'user', content: noAppContent, type: 'system', timestamp: new Date(), read: false
+          });
+          const noAppData = { id: noAppMsg.id, senderId: 'admin', senderUsername: 'Sistema', senderRole: 'admin', receiverId: user.id, receiverRole: 'user', content: noAppContent, timestamp: new Date(), type: 'system' };
+          io.to(`user_${user.id}`).emit('new_message', noAppData);
+          io.to(`chat_${user.id}`).emit('new_message', noAppData);
+          notifyAdmins('new_message', { message: noAppData, userId: user.id, username: user.username });
+        }
+      } catch (noAppErr) {
+        logger.warn(`[hgcash-bonus] aviso sin-app falló: ${noAppErr.message}`);
+      }
+    }
+
     // SLA: la auto-carga ES la respuesta al cliente → frena el reloj de demoras
     // (antes quedaba como "sin respuesta" porque la carga es automática, no un agente).
     try { await delayClockResolve(user.id, { responded: true, agentId: 'auto-hgcash', agentUsername: 'auto-hgcash', via: 'auto_carga', queueHint: 'cargas' }); } catch (_) {}
@@ -2152,7 +2183,7 @@ async function hgcashAutoCarga({ movement, comprobante, mode }) {
     await maybeSendRecoveryMessage(user);
 
     const bonusNote = appBonus.applied
-      ? ` ⚡ + BONO DE LOTE AUTOMÁTICO +${appBonus.pct}% (${appBonus.loteLabel}): $${Number(appBonus.amount).toLocaleString('es-AR')}. ${appBonus.loteScope === 'first' ? 'El bono quedó USADO.' : 'El bono sigue vigente para sus próximas cargas.'} No hay que marcar nada.`
+      ? (appBonus.kind !== 'lote' ? ` 🎁 + BONO AUTOMÁTICO ${appBonus.pct}% ${appBonus.kind === 'install_100' ? '(primera carga, app instalada)' : '(app instalada)'}: $${Number(appBonus.amount).toLocaleString('es-AR')}.` : ` ⚡ + BONO DE LOTE AUTOMÁTICO +${appBonus.pct}% (${appBonus.loteLabel}): $${Number(appBonus.amount).toLocaleString('es-AR')}. ${appBonus.loteScope === 'first' ? 'El bono quedó USADO.' : 'El bono sigue vigente para sus próximas cargas.'} No hay que marcar nada.`)
       : '';
     await _emitAdminOnlyChatNote(user.id, user.username, `🏦 ✅ CARGA AUTOMÁTICA hgcash — ${dataDesc}. Acreditado.${bonusNote}`);
     _emitHgcashUpdate('cargado');
@@ -6192,23 +6223,25 @@ async function getRefundNonDepositCredits(username, fromDate, toDate) {
 // eliminado el 2026-07-28). Umbrales y % editables desde el panel (solo admin
 // general) vía Config['refundTiers']. Un config guardado ANTES de que existiera
 // `dailyPercent` cae al default de cada rango (3/5/10).
+const REFUND_TYPES = ['daily', 'weekly', 'monthly'];
 const REFUND_TIER_DEFAULTS = {
-  bronce: { upTo: 30000, percent: 3, dailyPercent: 3 },
-  plata: { upTo: 100000, percent: 5, dailyPercent: 5 },
-  oro: { percent: 10, dailyPercent: 10 }
+  bronce: { upTo: 30000, daily: 3, weekly: 3, monthly: 3 },
+  plata: { upTo: 100000, daily: 5, weekly: 5, monthly: 5 },
+  oro: { daily: 10, weekly: 10, monthly: 10 }
 };
 const REFUND_TIER_META = {
   bronce: { label: 'Bronce', emoji: '🥉' },
   plata: { label: 'Plata', emoji: '🥈' },
   oro: { label: 'Oro', emoji: '🥇' }
 };
+function _tierWithAlias(t) { return Object.assign({}, t, { percent: t.monthly }); }
 async function getRefundTiers() {
   // Copia PROFUNDA: si fuera shallow, un caller que mute tiers.bronce.percent
   // envenenaría REFUND_TIER_DEFAULTS para todo el proceso.
   const d = {
-    bronce: { ...REFUND_TIER_DEFAULTS.bronce },
-    plata: { ...REFUND_TIER_DEFAULTS.plata },
-    oro: { ...REFUND_TIER_DEFAULTS.oro }
+    bronce: _tierWithAlias({ ...REFUND_TIER_DEFAULTS.bronce }),
+    plata: _tierWithAlias({ ...REFUND_TIER_DEFAULTS.plata }),
+    oro: _tierWithAlias({ ...REFUND_TIER_DEFAULTS.oro })
   };
   try {
     const cfg = await getConfig('refundTiers', null);
@@ -6221,10 +6254,19 @@ async function getRefundTiers() {
       const n = Number(v);
       return Number.isFinite(n) && n > 0 ? Math.round(n) : def;
     };
+    // Config vieja ({percent}) → los tres tipos con ese mismo %. Config nueva → cada uno.
+    const pcts = (c, def) => {
+      // Config vieja de ESTE repo: { percent (sem/mes), dailyPercent (diario) } → se mapea a los tres.
+      const legacy = c && c.percent != null ? pct(c.percent, null) : null;
+      const legacyDaily = c && c.dailyPercent != null ? pct(c.dailyPercent, legacy) : legacy;
+      const o = {};
+      for (const t of REFUND_TYPES) o[t] = pct(c && c[t] != null ? c[t] : (t === 'daily' ? legacyDaily : legacy), def[t]);
+      return o;
+    };
     const out = {
-      bronce: { upTo: upTo(cfg.bronce && cfg.bronce.upTo, d.bronce.upTo), percent: pct(cfg.bronce && cfg.bronce.percent, d.bronce.percent), dailyPercent: pct(cfg.bronce && cfg.bronce.dailyPercent, d.bronce.dailyPercent) },
-      plata: { upTo: upTo(cfg.plata && cfg.plata.upTo, d.plata.upTo), percent: pct(cfg.plata && cfg.plata.percent, d.plata.percent), dailyPercent: pct(cfg.plata && cfg.plata.dailyPercent, d.plata.dailyPercent) },
-      oro: { percent: pct(cfg.oro && cfg.oro.percent, d.oro.percent), dailyPercent: pct(cfg.oro && cfg.oro.dailyPercent, d.oro.dailyPercent) }
+      bronce: _tierWithAlias(Object.assign({ upTo: upTo(cfg.bronce && cfg.bronce.upTo, d.bronce.upTo) }, pcts(cfg.bronce, d.bronce))),
+      plata: _tierWithAlias(Object.assign({ upTo: upTo(cfg.plata && cfg.plata.upTo, d.plata.upTo) }, pcts(cfg.plata, d.plata))),
+      oro: _tierWithAlias(pcts(cfg.oro, d.oro))
     };
     // Coherencia: los umbrales tienen que ser crecientes; si no, defaults.
     if (out.bronce.upTo >= out.plata.upTo) return d;
@@ -6233,23 +6275,26 @@ async function getRefundTiers() {
     return d;
   }
 }
-// Devuelve el rango que corresponde a una pérdida mensual dada.
-// `percent` = % semanal/mensual · `dailyPercent` = % del reembolso diario.
-function computeRefundTier(monthNetLoss, tiers) {
+// Devuelve el rango que corresponde a una pérdida mensual dada. `type` (daily|weekly|
+// monthly) elige el % de ese reembolso; `pcts` trae los tres para mostrar.
+function computeRefundTier(monthNetLoss, tiers, type = 'monthly') {
   const loss = Math.max(0, Number(monthNetLoss) || 0);
   let key;
   if (loss <= tiers.bronce.upTo) key = 'bronce';
   else if (loss <= tiers.plata.upTo) key = 'plata';
   else key = 'oro';
-  return { key, label: REFUND_TIER_META[key].label, emoji: REFUND_TIER_META[key].emoji, percent: tiers[key].percent, dailyPercent: tiers[key].dailyPercent };
+  const t = tiers[key];
+  const pcts = { daily: t.daily, weekly: t.weekly, monthly: t.monthly };
+  return { key, label: REFUND_TIER_META[key].label, emoji: REFUND_TIER_META[key].emoji, percent: pcts[type] != null ? pcts[type] : t.monthly, pcts, dailyPercent: t.daily };
 }
+function _tierPublic(key, tiers) {
+  const t = tiers[key];
+  return { ...REFUND_TIER_META[key], upTo: t.upTo != null ? t.upTo : null, daily: t.daily, weekly: t.weekly, monthly: t.monthly, percent: t.monthly, dailyPercent: t.daily };
+}
+
 // Serializa la tabla de rangos para el front (PWA y panel).
 function serializeRefundTiers(tiers) {
-  return {
-    bronce: { ...REFUND_TIER_META.bronce, upTo: tiers.bronce.upTo, percent: tiers.bronce.percent, dailyPercent: tiers.bronce.dailyPercent },
-    plata: { ...REFUND_TIER_META.plata, upTo: tiers.plata.upTo, percent: tiers.plata.percent, dailyPercent: tiers.plata.dailyPercent },
-    oro: { ...REFUND_TIER_META.oro, upTo: null, percent: tiers.oro.percent, dailyPercent: tiers.oro.dailyPercent }
-  };
+  return { bronce: _tierPublic('bronce', tiers), plata: _tierPublic('plata', tiers), oro: _tierPublic('oro', tiers) };
 }
 // Rango de fechas (ART) del MES que define el rango para un período reembolsado
 // que ARRANCA en `startDateStr` ('YYYY-MM-DD'): si ese día cae en el mes EN
@@ -6328,24 +6373,25 @@ app.get('/api/refunds/status', authMiddleware, async (req, res) => {
     //   currentTier; ayer = último día del mes pasado (hoy es 1) → monthlyTier.
     //   El diario usa `dailyPercent` del rango (no `percent`).
     const tiers = await getRefundTiers();
-    const currentTier = computeRefundTier(currentMonthNetLoss, tiers);
-    const monthlyTier = computeRefundTier(monthlyNetLoss, tiers);
+    const currentTier = computeRefundTier(currentMonthNetLoss, tiers, 'monthly');
+    const monthlyTier = computeRefundTier(monthlyNetLoss, tiers, 'monthly');
     const _curMonthKey = currentMonthRange.fromDateStr.slice(0, 7);
     const weeklyTier = lastWeekRange.fromDateStr.slice(0, 7) === _curMonthKey ? currentTier : monthlyTier;
     const dailyTier = yesterdayRange.dateStr.slice(0, 7) === _curMonthKey ? currentTier : monthlyTier;
 
-    const dailyPotential = Math.round(dailyNetLoss * (dailyTier.dailyPercent / 100));
-    const weeklyPotential = Math.round(weeklyNetLoss * (weeklyTier.percent / 100));
-    const monthlyPotential = Math.round(monthlyNetLoss * (monthlyTier.percent / 100));
+    // #108 (réplica #163): cada tipo usa SU % dentro del rango.
+    const dailyPotential = Math.round(dailyNetLoss * (dailyTier.pcts.daily / 100));
+    const weeklyPotential = Math.round(weeklyNetLoss * (weeklyTier.pcts.weekly / 100));
+    const monthlyPotential = Math.round(monthlyNetLoss * (monthlyTier.pcts.monthly / 100));
 
     // Info de "cuánto falta para el próximo rango" (para la card de la PWA).
     // El corte es INCLUSIVO (hasta upTo = ese rango), así que para subir hay que
     // SUPERAR el tope: missing = upTo - pérdida + 1 (nunca 0 estando en el rango).
     let nextTier = null;
     if (currentTier.key === 'bronce') {
-      nextTier = { key: 'plata', label: REFUND_TIER_META.plata.label, emoji: REFUND_TIER_META.plata.emoji, percent: tiers.plata.percent, dailyPercent: tiers.plata.dailyPercent, missing: Math.max(1, tiers.bronce.upTo - currentMonthNetLoss + 1) };
+      nextTier = { key: 'plata', label: REFUND_TIER_META.plata.label, emoji: REFUND_TIER_META.plata.emoji, daily: tiers.plata.daily, weekly: tiers.plata.weekly, monthly: tiers.plata.monthly, percent: tiers.plata.monthly, dailyPercent: tiers.plata.daily, missing: Math.max(1, tiers.bronce.upTo - currentMonthNetLoss + 1) };
     } else if (currentTier.key === 'plata') {
-      nextTier = { key: 'oro', label: REFUND_TIER_META.oro.label, emoji: REFUND_TIER_META.oro.emoji, percent: tiers.oro.percent, dailyPercent: tiers.oro.dailyPercent, missing: Math.max(1, tiers.plata.upTo - currentMonthNetLoss + 1) };
+      nextTier = { key: 'oro', label: REFUND_TIER_META.oro.label, emoji: REFUND_TIER_META.oro.emoji, daily: tiers.oro.daily, weekly: tiers.oro.weekly, monthly: tiers.oro.monthly, percent: tiers.oro.monthly, dailyPercent: tiers.oro.daily, missing: Math.max(1, tiers.plata.upTo - currentMonthNetLoss + 1) };
     }
 
     res.json({
@@ -6358,6 +6404,7 @@ app.get('/api/refunds/status', authMiddleware, async (req, res) => {
         ...currentTier,
         percentage: currentTier.percent,
         dailyPercentage: currentTier.dailyPercent,
+        pcts: currentTier.pcts, // #108 { daily, weekly, monthly } del rango en vivo
         monthNetLoss: currentMonthNetLoss,
         period: `${currentMonthRange.fromDateStr} a ${currentMonthRange.toDateStr}`,
         nextTier,
@@ -6367,7 +6414,7 @@ app.get('/api/refunds/status', authMiddleware, async (req, res) => {
         ...dailyStatus,
         potentialAmount: dailyPotential,
         netAmount: dailyNetLoss,
-        percentage: dailyTier.dailyPercent,
+        percentage: dailyTier.pcts.daily,
         tier: dailyTier.key,
         period: yesterdayRange.dateStr
       },
@@ -6375,7 +6422,7 @@ app.get('/api/refunds/status', authMiddleware, async (req, res) => {
         ...weeklyStatus,
         potentialAmount: weeklyPotential,
         netAmount: weeklyNetLoss,
-        percentage: weeklyTier.percent,
+        percentage: weeklyTier.pcts.weekly,
         tier: weeklyTier.key,
         period: `${lastWeekRange.fromDateStr} a ${lastWeekRange.toDateStr}`
       },
@@ -6383,7 +6430,7 @@ app.get('/api/refunds/status', authMiddleware, async (req, res) => {
         ...monthlyStatus,
         potentialAmount: monthlyPotential,
         netAmount: monthlyNetLoss,
-        percentage: monthlyTier.percent,
+        percentage: monthlyTier.pcts.monthly,
         tier: monthlyTier.key,
         period: `${lastMonthRange.fromDateStr} a ${lastMonthRange.toDateStr}`
       }
@@ -6474,8 +6521,8 @@ app.post('/api/refunds/claim/daily', authMiddleware, async (req, res) => {
         return res.json({ success: false, message: 'No pudimos calcular tu rango en este momento (la plataforma está demorada). Probá en unos minutos.', canClaim: true });
       }
       const monthNetLoss = Math.max(0, Number(tierRes.totalGgr) || 0);
-      const tier = computeRefundTier(monthNetLoss, tiers);
-      const dailyPct = tier.dailyPercent;
+      const tier = computeRefundTier(monthNetLoss, tiers, 'daily');
+      const dailyPct = tier.pcts.daily;
       // % diario en 0 = el admin apagó el diario para ese rango: mensaje claro
       // (no "tu pérdida es muy chica") y sin reservar el período.
       if (!(dailyPct > 0)) {
@@ -6659,8 +6706,8 @@ app.post('/api/refunds/claim/weekly', authMiddleware, async (req, res) => {
         return res.json({ success: false, message: 'No pudimos calcular tu rango en este momento (la plataforma está demorada). Probá en unos minutos.', canClaim: true });
       }
       const monthNetLoss = Math.max(0, Number(tierRes.totalGgr) || 0);
-      const tier = computeRefundTier(monthNetLoss, tiers);
-      const weeklyPct = tier.percent;
+      const tier = computeRefundTier(monthNetLoss, tiers, 'weekly');
+      const weeklyPct = tier.pcts.weekly;
       const refundAmount = Math.round(netLoss * (weeklyPct / 100));
 
       logger.info('[REFUND] weekly — calculado para', username, 'netLoss:', netLoss, 'rango:', tier.key, `(pérdida mes ${monthNetLoss})`, 'pct:', weeklyPct, 'refund:', refundAmount);
@@ -6816,8 +6863,8 @@ app.post('/api/refunds/claim/monthly', authMiddleware, async (req, res) => {
       // define por la pérdida del propio mes reembolsado (perdiste $X ese mes →
       // ese X define bronce/plata/oro y el % se aplica sobre ese mismo X).
       const tiers = await getRefundTiers();
-      const tier = computeRefundTier(netLoss, tiers);
-      const monthlyPct = tier.percent;
+      const tier = computeRefundTier(netLoss, tiers, 'monthly');
+      const monthlyPct = tier.pcts.monthly;
       const refundAmount = Math.round(netLoss * (monthlyPct / 100));
 
       logger.info('[REFUND] monthly — calculado para', username, 'netLoss:', netLoss, 'rango:', tier.key, 'pct:', monthlyPct, 'refund:', refundAmount);
@@ -6988,20 +7035,32 @@ app.post('/api/admin/refund-tiers', authMiddleware, adminMiddleware, async (req,
       if (!Number.isFinite(n) || n <= 0) return NaN;
       return Math.round(n);
     };
-    const next = {
-      bronce: { upTo: pickUpTo(b.bronceUpTo, cur.bronce.upTo), percent: pickPct(b.broncePct, cur.bronce.percent), dailyPercent: pickPct(b.bronceDailyPct, cur.bronce.dailyPercent) },
-      plata: { upTo: pickUpTo(b.plataUpTo, cur.plata.upTo), percent: pickPct(b.plataPct, cur.plata.percent), dailyPercent: pickPct(b.plataDailyPct, cur.plata.dailyPercent) },
-      oro: { percent: pickPct(b.oroPct, cur.oro.percent), dailyPercent: pickPct(b.oroDailyPct, cur.oro.dailyPercent) }
+    // #163: 3 % por rango (daily/weekly/monthly). Compat: `broncePct` (viejo) fija los tres.
+    const pctsOf = (key) => {
+      const o = {};
+      for (const t of REFUND_TYPES) {
+        const v = b[`${key}${t.charAt(0).toUpperCase() + t.slice(1)}Pct`]; // ej. oroDailyPct
+        const legacy = b[`${key}Pct`];
+        o[t] = pickPct(v !== undefined ? v : legacy, cur[key][t]);
+      }
+      return o;
     };
-    if ([next.bronce.upTo, next.bronce.percent, next.bronce.dailyPercent, next.plata.upTo, next.plata.percent, next.plata.dailyPercent, next.oro.percent, next.oro.dailyPercent].some(Number.isNaN)) {
+    const next = {
+      bronce: Object.assign({ upTo: pickUpTo(b.bronceUpTo, cur.bronce.upTo) }, pctsOf('bronce')),
+      plata: Object.assign({ upTo: pickUpTo(b.plataUpTo, cur.plata.upTo) }, pctsOf('plata')),
+      oro: pctsOf('oro')
+    };
+    const allNums = [next.bronce.upTo, next.plata.upTo].concat(...['bronce', 'plata', 'oro'].map(k => REFUND_TYPES.map(t => next[k][t])));
+    if (allNums.some(Number.isNaN)) {
       return res.status(400).json({ error: 'Valores inválidos: los topes deben ser montos positivos y los porcentajes números entre 0 y 100.' });
     }
     if (next.bronce.upTo >= next.plata.upTo) {
       return res.status(400).json({ error: 'El tope de Bronce debe ser menor que el de Plata.' });
     }
     await setConfig('refundTiers', next);
-    logger.info(`[refund-tiers] actualizado por ${req.user.username}: bronce hasta $${next.bronce.upTo} = ${next.bronce.percent}% (diario ${next.bronce.dailyPercent}%) · plata hasta $${next.plata.upTo} = ${next.plata.percent}% (diario ${next.plata.dailyPercent}%) · oro = ${next.oro.percent}% (diario ${next.oro.dailyPercent}%)`);
-    res.json({ success: true, tiers: next });
+    const fmt = (k) => `${k} ${REFUND_TYPES.map(t => t[0].toUpperCase() + ':' + next[k][t] + '%').join(' ')}`;
+    logger.info(`[refund-tiers] actualizado por ${req.user.username}: bronce hasta $${next.bronce.upTo} · plata hasta $${next.plata.upTo} · ${fmt('bronce')} · ${fmt('plata')} · ${fmt('oro')}`);
+    res.json({ success: true, tiers: await getRefundTiers() });
   } catch (error) {
     console.error('Error guardando rangos de reembolso:', error);
     res.status(500).json({ error: 'Error del servidor' });
@@ -9046,6 +9105,18 @@ async function initializeData() {
       description: 'Mensaje de felicitación cuando el usuario desbloquea el cupón 100% próxima carga por instalar la app. Variables: {username}',
       type: 'message',
       response: '🎁 ¡Felicitaciones {username}! Por instalar la app desbloqueaste un BONO del 100% EXTRA en tu PRÓXIMA CARGA. 🚀 Avisale al cajero cuando cargues para que te lo aplique. 🥳'
+    },
+    {
+      name: '/sys_deposit_no_app_20',
+      description: 'Aviso tras una carga AUTOMÁTICA (hgcash) a clientes SIN app instalada o sin notificaciones: la carga entró sin el bono automático. Variables: {username}, {pctPrimera}, {pctTodas} (los % configurados en la card "Bonos automáticos hgcash"). Si lo dejás vacío, no se envía.',
+      type: 'message',
+      response: '🎁 {username}, esta carga entró SIN BONO. 😮\n\n📲 Instalá la app y activá las notificaciones para recibir:\n• 💥 {pctPrimera}% EXTRA en tu primera carga\n• 🔥 {pctTodas}% EXTRA en TODAS tus cargas automáticas (hasta el 31/08)\n\nSe acreditan SOLOS, sin pedir nada. 🚀\n📲 Tocá "📱 Instalar App" o, en el menú del navegador, "Agregar a pantalla de inicio".'
+    },
+    {
+      name: '/sys_deposit_no_bonus_saldo',
+      description: 'Aviso tras una carga AUTOMÁTICA (hgcash) cuando NO se dio el bono del 20% porque el cliente ya tenía más de $500 de saldo en la cuenta antes de cargar. Variables: {username}, {saldo} (saldo previo), {pctTodas} (% configurado), {limite} (tope de saldo, 500). Si lo dejás vacío, no se envía.',
+      type: 'message',
+      response: '🎁 {username}, esta carga entró SIN el bono del {pctTodas}% porque ya contás con saldo en tu cuenta (${saldo}). 💰\n\nEl bono automático se acredita cuando tu saldo es de ${limite} o menos al momento de cargar. ¡Gracias por tu carga! 🚀'
     },
     {
       name: '/sys_payout_paid',
@@ -13316,6 +13387,41 @@ app.post('/api/admin/hgcash/config', authMiddleware, adminMiddleware, async (req
 });
 
 // Movimientos recientes del banco (para auditar matches y reconciliar).
+// Bonos automáticos por app + notificaciones de las cargas hgcash: interruptores
+// y porcentajes (Config['hgcashAppBonus']). Solo admin general — es plata.
+app.get('/api/admin/hgcash/app-bonus', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    res.json({ config: await getHgcashAppBonusConfig(), promo20Until: HGCASH_APP_BONUS_20_UNTIL.toISOString() });
+  } catch (error) {
+    logger.error(`GET /api/admin/hgcash/app-bonus: ${error.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+app.post('/api/admin/hgcash/app-bonus', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const cur = await getHgcashAppBonusConfig();
+    const b = req.body || {};
+    const capN = Math.round(Number(b.firstCapARS)); const exN = Math.round(Number(b.firstExcessPct));
+    const next = {
+      firstEnabled: typeof b.firstEnabled === 'boolean' ? b.firstEnabled : cur.firstEnabled,
+      firstPct: _hgcashBonusPct(b.firstPct, cur.firstPct),
+      firstCapARS: Number.isFinite(capN) && capN >= 0 ? capN : cur.firstCapARS,      // #164 0 = sin tope
+      firstExcessPct: Number.isFinite(exN) && exN >= 0 && exN <= 200 ? exN : cur.firstExcessPct,
+      allEnabled: typeof b.allEnabled === 'boolean' ? b.allEnabled : cur.allEnabled,
+      allPct: _hgcashBonusPct(b.allPct, cur.allPct)
+    };
+    await setConfig('hgcashAppBonus', next);
+    logger.info(`[hgcash-bonus] config actualizada por ${req.user.username}: primera=${next.firstEnabled ? next.firstPct + '% hasta $' + next.firstCapARS + ' + ' + next.firstExcessPct + '% excedente' : 'OFF'} todas=${next.allEnabled ? next.allPct + '%' : 'OFF'}`);
+    res.json({ success: true, config: next });
+  } catch (error) {
+    logger.error(`POST /api/admin/hgcash/app-bonus: ${error.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
 app.get('/api/admin/hgcash/movements', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
@@ -15869,10 +15975,11 @@ app.delete('/api/admin/reviews/:id', authMiddleware, adminMiddleware, async (req
 // ============================================================================
 // TOPE DEL % DE LOTE (réplica #164/#172 del repo hermano; WORKLOG #103 de este repo).
 // Config['hgcashAppBonus'] = { firstEnabled, firstPct, firstCapARS, firstExcessPct,
-// allEnabled, allPct }. En ESTE repo no existe el "bono app automático" (#164 del
-// hermano): la config se usa SOLO como tope del % de un lote (firstCapARS /
-// firstExcessPct). No tiene card en el panel: rige el default ($5.000 / 20%) salvo
-// que se edite Config['hgcashAppBonus'] en la DB.
+// allEnabled, allPct }. #108: BONO AUTOMÁTICO en las cargas hgcash a clientes con la app
+// instalada y notificaciones (réplica #110/#111/#164 del gemelo): 100% de PRIMERA carga
+// (consume el cupón de instalación; hasta `firstCapARS` + `firstExcessPct` del excedente) o
+// `allPct` en todas las cargas hasta HGCASH_APP_BONUS_20_UNTIL. Editable en el panel
+// (COMANDOS → "🎁 Bonos automáticos hgcash"). La misma config es el tope del % de lote.
 // ============================================================================
 const HGCASH_APP_BONUS_DEFAULTS = { firstEnabled: true, firstPct: 100, firstCapARS: 5000, firstExcessPct: 20, allEnabled: true, allPct: 20 };
 function _hgcashBonusPct(v, fallback) {
@@ -15915,6 +16022,179 @@ async function getHgcashAppBonusConfig() {
     return Object.assign({}, HGCASH_APP_BONUS_DEFAULTS);
   }
 }
+
+// Fecha límite del bono "todas las cargas" (20%): fija en código, como en el gemelo.
+const HGCASH_APP_BONUS_20_UNTIL = new Date('2026-08-31T23:59:59.999-03:00');
+// Si el cliente ya tiene MÁS de este saldo antes de la carga, entra SIN el 20% (el 100% no se ve afectado).
+const HGCASH_APP_BONUS_SKIP_BALANCE_ARS = 500;
+// Bono de primera carga con tope: 100% hasta el tope + excedente al % menor.
+function _hgcashFirstBonusAmount(amount, cfg) {
+  const a = Math.max(0, Number(amount) || 0);
+  const cap = Number(cfg.firstCapARS) > 0 ? Number(cfg.firstCapARS) : Infinity;
+  const base = Math.min(a, cap);
+  const excess = Math.max(0, a - cap);
+  return Math.round(base * (Number(cfg.firstPct) || 0) / 100 + excess * (Number(cfg.firstExcessPct) || 0) / 100);
+}
+
+// Anti-multicuenta por dispositivo (mismo guard que install-bonus/claim): si un
+// token FCM de este usuario ya figura en OTRO usuario que ya reclamó el bono,
+// no se otorga. Ante error de DB devuelve false (fail-closed: es un bono).
+async function _installBonusDeviceFree(user) {
+  try {
+    const tokens = [];
+    if (user.fcmToken) tokens.push(user.fcmToken);
+    if (Array.isArray(user.fcmTokens)) {
+      for (const t of user.fcmTokens) {
+        if (t && t.token && !tokens.includes(t.token)) tokens.push(t.token);
+      }
+    }
+    if (tokens.length === 0) return true;
+    const conflict = await User.findOne({
+      id: { $ne: user.id },
+      installBonusClaimed: true,
+      $or: [{ fcmToken: { $in: tokens } }, { 'fcmTokens.token': { $in: tokens } }]
+    }).select('username').lean();
+    if (conflict) {
+      logger.warn(`[hgcash-bonus] 100% bloqueado por dispositivo repetido: user=${user.username} conflictWith=${conflict.username}`);
+    }
+    return !conflict;
+  } catch (e) {
+    logger.warn(`[hgcash-bonus] chequeo de dispositivo falló (no se otorga el 100%): ${e.message}`);
+    return false;
+  }
+}
+
+// Decide, acredita y deja plasmado el bono de una carga automática. La carga
+// principal YA está acreditada cuando se llama; cualquier fallo acá NO debe
+// tumbar el flujo (devuelve applied:false y avisa al agente para aplicarlo a
+// mano). Devuelve { applied, amount, kind: 'install_100'|'app_20'|null, hasApp }.
+// preBalance = saldo ANTES de acreditar la carga (null si no se pudo leer): con
+// más de HGCASH_APP_BONUS_SKIP_BALANCE_ARS el 20% NO se da (skippedForBalance).
+async function _hgcashApplyAppBonus(user, amount, preBalance = null) {
+  const out = { applied: false, amount: 0, kind: null, hasApp: false, noticeOk: false, skippedForBalance: false, preBalance: preBalance, cfg: HGCASH_APP_BONUS_DEFAULTS };
+  try {
+    out.hasApp = _rouletteHasAppInstalled(user);
+    const cfg = await getHgcashAppBonusConfig();
+    out.cfg = cfg;
+    const promo20Alive = cfg.allEnabled && Date.now() <= HGCASH_APP_BONUS_20_UNTIL.getTime();
+    if (!out.hasApp) {
+      // El aviso "te perdiste el bono" sólo tiene sentido si HAY algún bono
+      // prendido que el cliente pueda destrabar instalando la app.
+      out.noticeOk = cfg.firstEnabled || promo20Alive;
+      return out;
+    }
+
+    // 1) ¿Le corresponde el bono de primera carga? (sólo si está prendido desde
+    //    el panel — apagado NO consume el cupón). Marca ATÓMICA antes de
+    //    acreditar (mismo patrón reserva→acreditar de los reembolsos): dos
+    //    cargas concurrentes no pueden consumir el cupón dos veces.
+    let branch = null; // 'pending' (cupón reclamado) | 'auto_grant' (detección)
+    if (cfg.firstEnabled) {
+      const usedPending = await User.findOneAndUpdate(
+        { id: user.id, installBonus100Pending: true },
+        { $set: { installBonus100Pending: false, installBonus100UsedAt: new Date(), installBonus100UsedBy: 'auto-hgcash' } }
+      );
+      if (usedPending) {
+        branch = 'pending';
+      } else if (await _installBonusDeviceFree(user)) {
+        const granted = await User.findOneAndUpdate(
+          { id: user.id, installBonusClaimed: { $ne: true } },
+          { $set: {
+            installBonusClaimed: true,
+            installBonusClaimedAt: new Date(),
+            installBonus100GrantedAt: new Date(),
+            installBonus100Pending: false,
+            installBonus100UsedAt: new Date(),
+            installBonus100UsedBy: 'auto-hgcash'
+          } }
+        );
+        if (granted) branch = 'auto_grant';
+      }
+    }
+
+    let pct = 0;
+    let kind = null;
+    if (branch) {
+      pct = cfg.firstPct; kind = 'install_100';
+    } else if (promo20Alive) {
+      // Con saldo previo MAYOR al tope, la carga entra SIN el 20% (el cliente ya
+      // cuenta con saldo). Si el saldo no se pudo leer (preBalance null), se da
+      // el bono como siempre — no se castiga al cliente por una lectura caída.
+      if (preBalance !== null && Number(preBalance) > HGCASH_APP_BONUS_SKIP_BALANCE_ARS) {
+        out.skippedForBalance = true;
+        logger.info(`[hgcash-bonus] 20% omitido por saldo previo user=${user.username} saldo=$${Number(preBalance)} > $${HGCASH_APP_BONUS_SKIP_BALANCE_ARS}`);
+        return out;
+      }
+      pct = cfg.allPct; kind = 'app_20';
+    }
+    if (!pct) return out;
+
+    // #164: el 100% de primera carga tiene TOPE; el excedente va al % menor.
+    const bonusAmount = kind === 'install_100' ? _hgcashFirstBonusAmount(amount, cfg) : Math.round(Number(amount) * pct / 100);
+    if (!(bonusAmount > 0)) return out;
+
+    // Pausa anti rate-limit de JUGAYGANA entre la carga principal y el bonus
+    // (misma causa documentada del bug "carga sí, bonus no" del flujo manual).
+    await new Promise(r => setTimeout(r, 700));
+    const credit = await jugaygana.creditUserBalanceVerified(user.username, bonusAmount, user.jugayganaUserId || null).catch((e) => ({ success: false, ambiguous: true, error: e && e.message }));
+    if (credit && credit.ambiguous) {
+      // #151: el bono puede haber entrado. NO se devuelve el cupón (evita cobrarlo dos veces).
+      await _alertMoneyAmbiguous(`Bono automático ${pct}% (app)`, user.id, user.username, bonusAmount, credit.error);
+      return out;
+    }
+    if (!credit || !credit.success) {
+      // Deshacer la marca del 100% para que el cliente no pierda el cupón sin
+      // cobrarlo (guard por UsedBy='auto-hgcash' para no pisar otra marca).
+      if (branch === 'pending') {
+        try {
+          await User.updateOne(
+            { id: user.id, installBonus100UsedBy: 'auto-hgcash' },
+            { $set: { installBonus100Pending: true }, $unset: { installBonus100UsedAt: 1, installBonus100UsedBy: 1 } }
+          );
+        } catch (_) {}
+      } else if (branch === 'auto_grant') {
+        try {
+          await User.updateOne(
+            { id: user.id, installBonus100UsedBy: 'auto-hgcash' },
+            { $unset: { installBonusClaimed: 1, installBonusClaimedAt: 1, installBonus100GrantedAt: 1, installBonus100Pending: 1, installBonus100UsedAt: 1, installBonus100UsedBy: 1 } }
+          );
+        } catch (_) {}
+      }
+      const errStr = jugaygana.errToString((credit && credit.error) || 'fallo bonus');
+      await _emitAdminOnlyChatNote(user.id, user.username,
+        `🎁 ⚠️ El BONO AUTOMÁTICO del ${pct}% de la carga NO se pudo acreditar (${errStr}). Aplicalo a mano: $${bonusAmount.toLocaleString('es-AR')}.${branch ? ' El cupón 100% volvió a quedar pendiente.' : ''}`);
+      logger.error(`[hgcash-bonus] falló acreditación ${pct}% user=${user.username} $${bonusAmount}: ${errStr}`);
+      return out;
+    }
+
+    await Transaction.create({
+      id: uuidv4(),
+      type: 'bonus',
+      amount: bonusAmount,
+      username: user.username,
+      userId: user.id,
+      description: kind === 'install_100'
+        ? `Bono automático ${pct}% primera carga (app instalada${cfg.firstCapARS > 0 && Number(amount) > cfg.firstCapARS ? `; ${pct}% hasta $${cfg.firstCapARS.toLocaleString('es-AR')} + ${cfg.firstExcessPct}% del resto` : ''}) sobre carga de $${Number(amount).toLocaleString('es-AR')}`
+        : `Bono automático ${pct}% por app instalada (hgcash) sobre carga de $${Number(amount).toLocaleString('es-AR')}`,
+      adminUsername: 'auto-hgcash',
+      adminRole: 'system',
+      transactionId: credit.data?.transfer_id || credit.data?.transferId,
+      metadata: { source: 'auto_hgcash_bonus', kind },
+      timestamp: new Date()
+    });
+
+    out.applied = true;
+    out.amount = bonusAmount;
+    out.kind = kind;
+    out.pct = pct;
+    logger.info(`[hgcash-bonus] ${kind} acreditado user=${user.username} $${bonusAmount} (${pct}% de $${amount})`);
+    return out;
+  } catch (e) {
+    logger.error(`[hgcash-bonus] excepción (la carga principal ya está acreditada): ${e.message}`);
+    return out;
+  }
+}
+
 
 // ============================================================================
 // BONO DE CARGA (PromoBonus) — bonificación vigente activada por notificación.
@@ -17553,8 +17833,21 @@ app.get('/api/config/soporte-vip', async (req, res) => {
     const c = (await getConfig('soporteVipTelegram')) || {};
     // Soporta el formato viejo {handle,url} (solo Telegram) y el nuevo
     // {telegram,whatsapp}, así no se pierde la config previa tras el deploy.
-    const telegram = c.telegram || { handle: c.handle || '', url: c.url || '' };
-    const whatsapp = c.whatsapp || { number: '', url: '' };
+    let telegram = c.telegram || { handle: c.handle || '', url: c.url || '' };
+    let whatsapp = c.whatsapp || { number: '', url: '' };
+    // #108 (réplica #153): si la card del login está vacía, cae a lo que ya está cargado en
+    // COMANDOS: Telegram → Soporte VIP de Comunidad (communityConfig.supportUrl); WhatsApp → el
+    // general de Equipos si este repo los tiene. Sin nada cargado, el botón de la app avisa.
+    if (!telegram.url) {
+      const community = (await getConfig('communityConfig')) || {};
+      if (community.supportUrl) telegram = { handle: '', url: community.supportUrl, source: 'community' };
+    }
+    if (!whatsapp.url && typeof getTeamsConfig === 'function' && typeof buildWhatsappUrl === 'function') {
+      try {
+        const teamsCfg = await getTeamsConfig();
+        if (teamsCfg && teamsCfg.general && teamsCfg.general.whatsapp) whatsapp = { number: teamsCfg.general.whatsapp, url: buildWhatsappUrl(teamsCfg.general.whatsapp, SOPORTE_WA_MENSAJE), source: 'teams' };
+      } catch (_) {}
+    }
     res.json({
       telegram: telegram,
       whatsapp: whatsapp,

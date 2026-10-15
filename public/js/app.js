@@ -127,9 +127,21 @@ function setupEventListeners() {
         const helpWhatsappBtn = document.getElementById('helpWhatsappBtn');
         if (helpWhatsappBtn) helpWhatsappBtn.addEventListener('click', async () => {
             const d = await _vipFetchSoporte();
-            const url = (d && d.whatsapp && d.whatsapp.url) ? d.whatsapp.url : 'https://wa.link/metawin2026';
-            window.open(url, '_blank');
+            const url = (d && d.whatsapp && d.whatsapp.url) ? d.whatsapp.url : '';
+            if (url) {
+                window.open(url, '_blank');
+            } else {
+                VIP.ui.showToast('Soporte de WhatsApp no disponible por ahora', 'info');
+            }
         });
+        // #108: 💬 de la barra superior (ya adentro): mismo WhatsApp de soporte. Oculto hasta tener URL.
+        const topbarSupportBtn = document.getElementById('topbarSupportBtn');
+        if (topbarSupportBtn) {
+            _vipFetchSoporte().then(d => {
+                const url = (d && d.whatsapp && d.whatsapp.url) ? d.whatsapp.url : '';
+                if (url) { topbarSupportBtn.href = url; topbarSupportBtn.style.display = ''; }
+            });
+        }
         const helpTelegramBtn = document.getElementById('helpTelegramBtn');
         if (helpTelegramBtn) helpTelegramBtn.addEventListener('click', async () => {
             const d = await _vipFetchSoporte();

@@ -61,29 +61,31 @@ VIP.refunds = (function () {
         const badge = document.getElementById('dashTierBadge');
         if (badge) {
             badge.style.display = '';
-            const dp = t.dailyPercentage;
-            const pctTxt = (dp != null && dp !== t.percentage) ? `${dp}% diario · ${t.percentage}%` : `${t.percentage}%`;
-            badge.textContent = `TU RANGO: ${t.emoji || ''} ${(t.label || t.key).toUpperCase()} · ${pctTxt}`;
+            const pc = t.pcts || {};
+            badge.textContent = pc.daily != null
+                ? `TU RANGO: ${t.emoji || ''} ${(t.label || t.key).toUpperCase()} · ${pc.daily}/${pc.weekly}/${pc.monthly}%`
+                : `TU RANGO: ${t.emoji || ''} ${(t.label || t.key).toUpperCase()} · ${t.percentage}%`;
         }
 
         const panel = document.getElementById('unifiedTierPanel');
         if (panel) {
             const tiers = t.tiers || {};
+            const pctsOf = (tt) => tt.daily != null ? `${tt.daily}% · ${tt.weekly}% · ${tt.monthly}%` : `${tt.percent}%`;
             const row = (tt, active) => tt ? `
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;border-radius:6px;${active ? 'background:rgba(212,175,55,.18);border:1px solid rgba(212,175,55,.6);' : 'opacity:.75;'}">
                     <span style="font-size:12px;color:#fff;">${tt.emoji} ${tt.label}</span>
                     <span style="font-size:11px;color:#aaa;">${tt.upTo ? 'hasta ' + money(tt.upTo) : 'más de ' + money((tiers.plata && tiers.plata.upTo) || 0)}</span>
-                    <span style="font-size:11px;font-weight:900;color:#ffd700;white-space:nowrap;">${tt.dailyPercent != null ? '📅 ' + tt.dailyPercent + '% · ' : ''}📆🗓️ ${tt.percent}%</span>
+                    <span style="font-size:11px;font-weight:900;color:#ffd700;white-space:nowrap;">${pctsOf(tt)}</span>
                 </div>` : '';
             const next = t.nextTier ? `
                 <p style="font-size:11px;color:#00ff88;text-align:center;margin:6px 0 0;">
-                    Te faltan <strong>${money(t.nextTier.missing)}</strong> de juego este mes para subir a ${t.nextTier.emoji} ${t.nextTier.label} (${t.nextTier.dailyPercent != null && t.nextTier.dailyPercent !== t.nextTier.percent ? t.nextTier.dailyPercent + '% diario · ' : ''}${t.nextTier.percent}%)
+                    Te faltan <strong>${money(t.nextTier.missing)}</strong> de juego este mes para subir a ${t.nextTier.emoji} ${t.nextTier.label} (${pctsOf(t.nextTier)})
                 </p>` : `
                 <p style="font-size:11px;color:#ffd700;text-align:center;margin:6px 0 0;">¡Estás en el rango máximo! 🏆</p>`;
             panel.style.display = 'block';
             panel.innerHTML = `
                 <div style="background:linear-gradient(135deg,#2d0052,#1a0033);border:1px solid #d4af37;border-radius:10px;padding:10px;margin-bottom:4px;">
-                    <p style="text-align:center;font-size:13px;font-weight:900;color:#ffd700;margin:0 0 2px;">TU RANGO DEL MES: ${t.emoji} ${(t.label || '').toUpperCase()} — ${(t.dailyPercentage != null && t.dailyPercentage !== t.percentage) ? t.dailyPercentage + '% diario · ' : ''}${t.percentage}%</p>
+                    <p style="text-align:center;font-size:13px;font-weight:900;color:#ffd700;margin:0 0 2px;">TU RANGO DEL MES: ${t.emoji} ${(t.label || '').toUpperCase()}${t.pcts ? ' — ' + t.pcts.daily + '% diario · ' + t.pcts.weekly + '% semanal · ' + t.pcts.monthly + '% mensual' : ' — ' + t.percentage + '%'}</p>
                     <p style="text-align:center;font-size:10.5px;color:#aaa;margin:0 0 8px;">Se calcula con tu pérdida (NETWIN) del mes: ${money(t.monthNetLoss)}</p>
                     <div style="display:flex;flex-direction:column;gap:4px;">
                         ${row(tiers.bronce, t.key === 'bronce')}
@@ -91,7 +93,7 @@ VIP.refunds = (function () {
                         ${row(tiers.oro, t.key === 'oro')}
                     </div>
                     ${next}
-                    <p style="font-size:10px;color:#888;text-align:center;margin:6px 0 0;line-height:1.4;">📅 = % del diario · 📆🗓️ = % del semanal y mensual. El mensual usa el rango del mes que se reembolsa (el mes pasado); el semanal y el diario, el del mes al que pertenece ese período.</p>
+                    <p style="font-size:10px;color:#888;text-align:center;margin:6px 0 0;line-height:1.4;">📅 diario · 📆 semanal · 🗓️ mensual: cada reembolso tiene su % dentro del rango. El mensual usa el rango del mes que se reembolsa (el mes pasado); el semanal y el diario, el del mes al que pertenece ese período.</p>
                 </div>`;
         }
     }

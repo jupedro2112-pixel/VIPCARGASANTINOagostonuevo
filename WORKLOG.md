@@ -4,7 +4,45 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-07**
+> **Última actualización: 2026-10-15**
+
+## Sesión 2026-10-15
+
+### 108. Tres cards del gemelo portadas: 🎁 Bonos automáticos hgcash (app + notifs), 🏅 Rangos con % por tipo, 📲 Soporte del LOGIN en COMANDOS
+- **Owner (capturas del panel de AUTOREEMBOLSOSjygactivo):** "agregá estas 3 cosas" en este repo.
+- **1) Bonos automáticos hgcash (réplica #110/#111/#164 del gemelo).** Acá no existía el bono
+  app: `Config['hgcashAppBonus']` sólo servía de tope del % de lote. Nuevo
+  `_hgcashApplyAppBonus` (+ `_installBonusDeviceFree`, `_hgcashFirstBonusAmount`,
+  `HGCASH_APP_BONUS_20_UNTIL`, `HGCASH_APP_BONUS_SKIP_BALANCE_ARS`) copiado del gemelo con el
+  crédito VERIFICADO de este repo (`creditUserBalanceVerified`; ambiguo = cupón consumido + 🛑).
+  Hook en `hgcashAutoCarga` antes del lote (el lote sólo si no hubo bono app); la Transaction
+  de la carga guarda `bonus`; nota interna "🎁 + BONO AUTOMÁTICO …"; aviso al cliente sin app
+  `/sys_deposit_no_app_20` (+ `/sys_deposit_no_bonus_saldo`, sembrados). `preBalance` acá va
+  null (este flujo no lee saldo previo → el 20% nunca se omite por saldo). Endpoints `GET/POST
+  /api/admin/hgcash/app-bonus` y card "🎁 Bonos automáticos hgcash (app + notificaciones)" en
+  COMANDOS (`loadHgAppBonus/saveHgAppBonus`). ⚠️ El 20% "todas las cargas" vence el 31/08
+  (constante): hoy sólo rige el de PRIMERA carga.
+- **2) Rangos de reembolso con % por tipo (réplica #163).** Antes: `percent` (sem/mes) +
+  `dailyPercent`. Ahora `{ daily, weekly, monthly }` por rango (`REFUND_TYPES`,
+  `computeRefundTier(loss, tiers, type)` con `pcts`, `_tierPublic`/`serializeRefundTiers` con
+  alias `percent`/`dailyPercent`); la config guardada vieja se mapea sola. Status: cada tipo con
+  su %, `tier.pcts`, `nextTier` con los tres. Claims: diario `pcts.daily`, semanal `pcts.weekly`,
+  mensual `pcts.monthly`. `POST /api/admin/refund-tiers` acepta `bronceDailyPct…oroMonthlyPct`
+  (y `broncePct` viejo = los tres). Panel: tabla rango × (tope, diario, semanal, mensual). PWA:
+  badge "D/S/M%", tabla y "te faltan" con los tres.
+- **3) Soporte del LOGIN (réplica #153).** Ya había endpoints y card (al final de SMS Masivo).
+  `GET /api/config/soporte-vip` cae a `communityConfig.supportUrl` para Telegram (y al WhatsApp
+  general de Equipos si este repo los tuviera); la card se movió a COMANDOS debajo de Comunidad
+  (`loadSoporteVip()` en `loadCommands`). PWA: se eliminó el `wa.link` fijo (sin URL el botón
+  avisa) y el 💬 de la barra pasa a `#topbarSupportBtn`, oculto hasta tener URL.
+- **Versiones:** admin-sw v31 → v32; PWA `?v=56` → `?v=57` + SW v57.
+- **Validado:** `node --check` OK (server.js, admin.js, refunds.js, app.js, ambos SW); HTML del
+  panel 631/631 divs y de la PWA 381/381, ids únicos; rutas nuevas después de `authMiddleware`
+  (L13392 vs L2729). **Sin runtime** (sin node_modules). Redeploy (back + panel + PWA).
+  **PROBAR:** (1) COMANDOS → las tres cards cargan y guardan; (2) carga hgcash real a una cuenta
+  con app + cupón pendiente → bono 100% con tope + nota interna; sin app → aviso editable;
+  (3) rangos: poner 2/2/3 en Bronce y ver en la app "2/2/3%" y el % correcto en cada reclamo;
+  (4) login: con la card vacía, Telegram abre el Soporte VIP de Comunidad y WhatsApp avisa.
 
 ## Sesión 2026-10-13
 

@@ -592,65 +592,119 @@
                                 <span class="icon icon-save"></span> Guardar Comunidad
                             </button>
                         </div>
+                        <!-- #153 Soporte del LOGIN (WhatsApp + Telegram): los dos botones de
+                             arriba de la pantalla de login y el 💬 de la barra superior.
+                             Antes vivía al final de SMS Masivo (nadie lo encontraba). -->
+                        <div class="panel-subheader" style="margin-top: 24px;">
+                            <h3>📲 Soporte del LOGIN (WhatsApp + Telegram)</h3>
+                        </div>
+                        <div class="cbu-form">
+                            <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
+                                Alimenta los botones <b>"Soporte WhatsApp"</b> y <b>"Soporte Telegram"</b> de la pantalla de
+                                login (antes de entrar) y el 💬 de la barra superior.<br>
+                                Si dejás un campo vacío, se usa lo que ya está cargado: el Telegram cae al
+                                <b>Soporte VIP Telegram</b> de Comunidad (arriba).
+                                Sin nada cargado, el botón avisa "no disponible".
+                            </p>
+                            <div class="form-group">
+                                <label>WhatsApp (número con código de país):</label>
+                                <input type="text" id="soporteWhatsappNumber" placeholder="5491122334455" style="width:100%;">
+                                <small style="color:#aaa;font-size:11px;">Solo números, con código de país y sin signos. Ej: +54 9 11 2233-4455 → 5491122334455. El link abre WhatsApp con un mensaje de soporte ya escrito.</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Telegram (usuario con @):</label>
+                                <input type="text" id="soporteTelegramHandle" placeholder="@soportevip" style="width:100%;">
+                                <small style="color:#aaa;font-size:11px;">Poné el @ del usuario o canal, no el link.</small>
+                            </div>
+                            <button class="btn-primary" onclick="saveSoporteVip()">
+                                <span class="icon icon-save"></span> Guardar soporte del login
+                            </button>
+                        </div>
                         <!-- Rangos de reembolso bronce/plata/oro (solo admin general).
-                             Por rango: % semanal/mensual y % DIARIO aparte (diario repuesto 2026-08-29). -->
+                             Reemplaza a los % fijos diario/semanal/mensual (2026-07-28). -->
                         <div class="panel-subheader" style="margin-top: 24px;" id="refundTiersHeader">
                             <h3>🏅 Rangos de reembolso (🥉🥈🥇)</h3>
                         </div>
                         <div class="cbu-form" id="refundTiersForm">
                             <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
-                                El % de reembolso (diario, semanal Y mensual) depende del <b>rango</b> del cliente, según su
-                                <b>pérdida real (NETWIN)</b> del mes. Bronce: hasta su tope. Plata: hasta su tope.
-                                Oro: más que el tope de Plata. Cada rango tiene un <b>% semanal/mensual</b> y un
-                                <b>% DIARIO</b> aparte (sobre lo perdido ayer). Solo el admin general puede modificarlos.
+                                El <b>rango</b> del cliente (🥉🥈🥇) sale de su <b>pérdida real (NETWIN) del mes</b>: Bronce hasta su tope,
+                                Plata hasta su tope, Oro más que el tope de Plata. <b>Cada reembolso tiene su propio %</b> dentro del rango
+                                (diario / semanal / mensual), así Oro no tiene por qué dar lo mismo en los tres. Solo el admin general puede modificarlos.
                             </p>
-                            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
-                                <div class="form-group" style="flex:1;min-width:130px;">
-                                    <label>🥉 Bronce — hasta $</label>
-                                    <input type="number" id="tierBronceUpTo" min="1" step="1000" style="width:100%;">
-                                </div>
-                                <div class="form-group" style="flex:1;min-width:110px;">
-                                    <label>🥉 Sem/Mes %</label>
-                                    <input type="number" id="tierBroncePct" min="0" max="100" step="0.5" style="width:100%;">
-                                </div>
-                                <div class="form-group" style="flex:1;min-width:110px;">
-                                    <label>🥉 Diario %</label>
-                                    <input type="number" id="tierBronceDailyPct" min="0" max="100" step="0.5" style="width:100%;">
-                                </div>
+                            <div style="overflow-x:auto;">
+                                <table class="data-table" style="min-width:640px;">
+                                    <thead><tr><th>Rango</th><th>Pérdida del mes hasta $</th><th>📅 Diario %</th><th>📆 Semanal %</th><th>🗓️ Mensual %</th></tr></thead>
+                                    <tbody>
+                                        <tr><td>🥉 Bronce</td><td><input type="number" id="tierBronceUpTo" min="1" step="1000" style="width:130px;"></td>
+                                            <td><input type="number" id="tierBronceDailyPct" min="0" max="100" step="0.5" style="width:80px;"></td>
+                                            <td><input type="number" id="tierBronceWeeklyPct" min="0" max="100" step="0.5" style="width:80px;"></td>
+                                            <td><input type="number" id="tierBronceMonthlyPct" min="0" max="100" step="0.5" style="width:80px;"></td></tr>
+                                        <tr><td>🥈 Plata</td><td><input type="number" id="tierPlataUpTo" min="1" step="1000" style="width:130px;"></td>
+                                            <td><input type="number" id="tierPlataDailyPct" min="0" max="100" step="0.5" style="width:80px;"></td>
+                                            <td><input type="number" id="tierPlataWeeklyPct" min="0" max="100" step="0.5" style="width:80px;"></td>
+                                            <td><input type="number" id="tierPlataMonthlyPct" min="0" max="100" step="0.5" style="width:80px;"></td></tr>
+                                        <tr><td>🥇 Oro</td><td style="color:#888;font-size:12px;">más que Plata</td>
+                                            <td><input type="number" id="tierOroDailyPct" min="0" max="100" step="0.5" style="width:80px;"></td>
+                                            <td><input type="number" id="tierOroWeeklyPct" min="0" max="100" step="0.5" style="width:80px;"></td>
+                                            <td><input type="number" id="tierOroMonthlyPct" min="0" max="100" step="0.5" style="width:80px;"></td></tr>
+                                    </tbody>
+                                </table>
                             </div>
-                            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-top:6px;">
-                                <div class="form-group" style="flex:1;min-width:130px;">
-                                    <label>🥈 Plata — hasta $</label>
-                                    <input type="number" id="tierPlataUpTo" min="1" step="1000" style="width:100%;">
-                                </div>
-                                <div class="form-group" style="flex:1;min-width:110px;">
-                                    <label>🥈 Sem/Mes %</label>
-                                    <input type="number" id="tierPlataPct" min="0" max="100" step="0.5" style="width:100%;">
-                                </div>
-                                <div class="form-group" style="flex:1;min-width:110px;">
-                                    <label>🥈 Diario %</label>
-                                    <input type="number" id="tierPlataDailyPct" min="0" max="100" step="0.5" style="width:100%;">
-                                </div>
-                            </div>
-                            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-top:6px;">
-                                <div class="form-group" style="flex:1;min-width:130px;">
-                                    <label>🥇 Oro — más que Plata</label>
-                                    <input type="text" value="sin tope" disabled style="width:100%;opacity:.6;">
-                                </div>
-                                <div class="form-group" style="flex:1;min-width:110px;">
-                                    <label>🥇 Sem/Mes %</label>
-                                    <input type="number" id="tierOroPct" min="0" max="100" step="0.5" style="width:100%;">
-                                </div>
-                                <div class="form-group" style="flex:1;min-width:110px;">
-                                    <label>🥇 Diario %</label>
-                                    <input type="number" id="tierOroDailyPct" min="0" max="100" step="0.5" style="width:100%;">
-                                </div>
-                            </div>
-                            <button class="btn-primary" onclick="saveRefundTiers()">
+                            <button class="btn-primary" onclick="saveRefundTiers()" style="margin-top:10px;">
                                 <span class="icon icon-save"></span> Guardar rangos
                             </button>
                             <div id="refundTiersMsg" style="font-size:12px;margin-top:8px;color:#aaa;"></div>
                         </div>
+
+                        <!-- Bonos automáticos de las cargas hgcash (solo admin general) -->
+                        <div class="panel-subheader" style="margin-top: 24px;" id="hgAppBonusHeader">
+                            <h3>🎁 Bonos automáticos hgcash (app + notificaciones)</h3>
+                        </div>
+                        <div class="cbu-form" id="hgAppBonusForm">
+                            <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
+                                Bonos que se acreditan <b>SOLOS</b> en las cargas <b>AUTOMÁTICAS</b> por hgcash a
+                                clientes con la <b>app instalada y notificaciones activas</b> (las cargas manuales
+                                no cambian: ahí el bono lo aplica el agente).<br>
+                                El de <b>primera carga</b> usa el cupón de instalación: al acreditarse queda marcado
+                                como usado y <b>no se repite</b>. El de <b>todas las cargas</b> vence el
+                                <b><span id="hgAppBonusUntil">31/08 23:59 (hora argentina)</span></b>.<br>
+                                Destildá un bono para <b>frenarlo al instante</b> (la carga sigue entrando, sin bono).
+                            </p>
+                            <div style="background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.35);border-radius:8px;padding:10px;margin-bottom:10px;">
+                                <label style="display:flex;align-items:center;gap:8px;font-weight:700;cursor:pointer;">
+                                    <input type="checkbox" id="hgAppBonusFirstEnabled" style="width:auto;">
+                                    💥 Bono de PRIMERA carga (una sola vez por cliente)
+                                </label>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                                    <div class="form-group" style="flex:1;min-width:120px;margin:0;">
+                                        <label for="hgAppBonusFirstPct">Porcentaje (1–200)</label>
+                                        <input type="number" id="hgAppBonusFirstPct" min="1" max="200" step="1" placeholder="100">
+                                    </div>
+                                    <div class="form-group" style="flex:1;min-width:140px;margin:0;">
+                                        <label for="hgAppBonusFirstCap">Aplica hasta $ (0 = sin tope)</label>
+                                        <input type="number" id="hgAppBonusFirstCap" min="0" step="500" placeholder="5000">
+                                    </div>
+                                    <div class="form-group" style="flex:1;min-width:140px;margin:0;">
+                                        <label for="hgAppBonusFirstExcess">% sobre lo que excede el tope</label>
+                                        <input type="number" id="hgAppBonusFirstExcess" min="0" max="200" step="1" placeholder="20">
+                                    </div>
+                                </div>
+                                <p style="font-size:11px;color:#888;margin:6px 0 0;">Ej.: 100% hasta $5.000 y 20% del resto → una carga de $8.000 recibe $5.000 + $600 = $5.600 de bono, automático.</p>
+                            </div>
+                            <div style="background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.35);border-radius:8px;padding:10px;margin-bottom:10px;">
+                                <label style="display:flex;align-items:center;gap:8px;font-weight:700;cursor:pointer;">
+                                    <input type="checkbox" id="hgAppBonusAllEnabled" style="width:auto;">
+                                    🔥 Bono en TODAS las cargas automáticas (hasta el vencimiento)
+                                </label>
+                                <div class="form-group" style="margin-top:8px;">
+                                    <label for="hgAppBonusAllPct">Porcentaje (1–200)</label>
+                                    <input type="number" id="hgAppBonusAllPct" min="1" max="200" step="1" placeholder="20">
+                                </div>
+                            </div>
+                            <button class="btn-primary" onclick="saveHgAppBonus()">💾 Guardar bonos</button>
+                            <div id="hgAppBonusMsg" style="font-size:12px;margin-top:8px;color:#aaa;"></div>
+                        </div>
+
                         <!-- Premios del Fueguito (solo admin general) -->
                         <div class="panel-subheader" style="margin-top: 24px;" id="fireMilestonesHeader">
                             <h3>🔥 Premios del Fueguito</h3>
@@ -2487,26 +2541,6 @@
 
                 </div>
 
-                <!-- Soporte del login (WhatsApp + Telegram) — alimenta los dos
-                     botones de soporte de la pantalla de login. -->
-                <div class="panel-subheader" style="margin-top:24px;">
-                    <h3>💬 Soporte del login (WhatsApp + Telegram)</h3>
-                </div>
-                <div class="cbu-form">
-                    <div class="form-group">
-                        <label>WhatsApp (número con código de país):</label>
-                        <input type="text" id="soporteWhatsappNumber" placeholder="5491122334455" style="width:100%;">
-                        <small style="color:#aaa;font-size:11px;">Solo números, con código de país y sin signos. Ej: +54 9 11 2233-4455 → 5491122334455. El link abre WhatsApp con el mensaje: "Vengo de VIPCARGAS necesito ayuda".</small>
-                    </div>
-                    <div class="form-group">
-                        <label>Telegram (usuario con @):</label>
-                        <input type="text" id="soporteTelegramHandle" placeholder="@soportevip" style="width:100%;">
-                        <small style="color:#aaa;font-size:11px;">Poné el @ del usuario o canal, no el link.</small>
-                    </div>
-                    <button class="btn-primary" onclick="saveSoporteVip()">
-                        <span class="icon icon-save"></span> Guardar soporte
-                    </button>
-                </div>
             </section>
 
             <!-- ================================================== -->
