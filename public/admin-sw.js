@@ -34,7 +34,7 @@ firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
 
 // Bump this version with every deploy so the admin PWA always loads fresh code.
-const CACHE_VERSION = 'v32'; // v32: cards Bonos automáticos hgcash, Rangos con % por tipo y Soporte del login en COMANDOS (#108) // v31: el secreto hgcash de AWS ya no se acepta si hay uno en el panel (#107). v30: credenciales hgcash y reenvío desde el panel (v29: referidos; v28: fichas por tiempo se reclaman; v27: lotes con regalo; v26: % diario por rango en la card de reembolsos; v25: mensajes internos en verde)
+const CACHE_VERSION = 'v33'; // v33: tope propio por lote (% completo hasta $X + Y% del resto) (réplica #189 de AUTOREEMBOLSOSjygactivo) // v32: cards Bonos automáticos hgcash, Rangos con % por tipo y Soporte del login en COMANDOS (#108) // v31: el secreto hgcash de AWS ya no se acepta si hay uno en el panel (#107). v30: credenciales hgcash y reenvío desde el panel (v29: referidos; v28: fichas por tiempo se reclaman; v27: lotes con regalo; v26: % diario por rango en la card de reembolsos; v25: mensajes internos en verde)
 const CACHE_NAME = 'admin-sala-' + CACHE_VERSION;
 
 // Only pre-cache stable assets (icons rarely change).

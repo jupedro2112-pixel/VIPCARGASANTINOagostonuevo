@@ -47,6 +47,10 @@ const notifBatchSchema = new mongoose.Schema({
   // el % automático. null = a cualquier hora dentro de la vigencia.
   applyFromMin: { type: Number, default: null },
   applyToMin: { type: Number, default: null },
+  // #CAP TOPE PROPIO del % de ESTE lote (sólo % automático): el % completo aplica hasta `capARS`
+  // y el excedente de la carga va al `capExcessPct`. null = tope global; capARS 0 = sin tope.
+  capARS: { type: Number, default: null },
+  capExcessPct: { type: Number, default: null },
 
   // (Heredado del repo hermano: en JUGAYGANA no hay rollover configurable por
   // crédito; se guarda solo por compatibilidad del historial.)
