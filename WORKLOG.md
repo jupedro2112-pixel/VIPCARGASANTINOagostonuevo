@@ -8,6 +8,35 @@
 
 ## Sesión 2026-10-19
 
+### 114. 🔐 Cambio de contraseña: teléfono OPCIONAL (solo lo exige el retiro) + "Cerrar todas las sesiones" ya no desloguea al que lo tilda — réplica #157 de PAUTANUEVAsantino
+- **Owner (captura del modal "Cambio de Contraseña Obligatorio"):** "pide el número obligatoriamente;
+  que solo lo pida en el retiro y en el cambio sea opcional. Si ya tiene número verificado que no lo
+  vuelva a pedir. Y que 'cerrar sesión' cierre a todos menos al que pide el cambio, porque antes también
+  deslogueaba al que cambiaba la contraseña. Chequeá si en VIP ya lo cambié o sigue igual."
+- **Chequeo:** (1) teléfono verificado → VIP YA lo ocultaba (`prepareChangePasswordModal`), nada que hacer;
+  (2) teléfono obligatorio → seguía obligatorio (front rechazaba el submit sin número); (3) cerrar
+  sesiones → seguía el comportamiento viejo: subir `tokenVersion` mataba también el JWT de la request y el
+  front se deslogueaba solo (`removeItem('userToken')` + reload). El retiro ya exigía `phoneVerified`
+  (`/api/withdrawal/request` → `PHONE_VERIFICATION_REQUIRED`), así que la exigencia queda solo ahí.
+- **Backend (`/api/auth/change-password` y `/change-password/pending`):** con `closeAllSessions`, además
+  de subir `tokenVersion`, emiten un **token fresco** (mismo payload que el login, 30 d) y lo devuelven como
+  `token`. El server ya aceptaba el cambio sin teléfono (sin OTP exige `currentPassword` salvo en el cambio
+  obligatorio) — no cambió esa lógica.
+- **PWA (`auth.js`, `app.js`, `index.html`, `?v=60` / SW v60):**
+  - Campo "Número de WhatsApp (opcional)" sin `required`; botón "⏭ Omitir por ahora (lo verificás cuando
+    quieras retirar)" (solo si no hay teléfono verificado). Submit sin número → guarda la clave sin
+    teléfono, toast "para RETIRAR vas a tener que verificar tu teléfono" y refresca el banner de
+    verificación. Si escribe un número → OTP como antes.
+  - "Contraseña actual" se muestra en TODO cambio voluntario (sin `required`): se exige en el submit cuando
+    no hay teléfono nuevo con OTP (mismo criterio que el server).
+  - `_commitPasswordChange` y la entrada temporal guardan el `token` fresco (`VIP.state.currentToken` +
+    localStorage) y muestran "Se cerraron las sesiones en los demás dispositivos. La tuya sigue activa."
+    Fallback: si el back fuera viejo y no devolviera `token`, relogin como antes (nunca queda con un JWT
+    muerto).
+- **Probar tras deploy:** cambiar clave con el tilde puesto → seguir navegando sin reloguear; otro
+  dispositivo con la misma cuenta → al próximo request lo saca. Cambio obligatorio sin teléfono → entra;
+  intentar retirar → pide verificar SMS.
+
 ### 113. 🎰 Ruleta diaria v2: premios configurables (% EXTRA / saldo / sin premio), gates editables y Transacciones del premio — réplica #254/#293/#303/#305/#306 de PAUTANUEVAsantino
 - **Owner:** "en PAUTA cuando reclaman un regalo de la ruleta diaria aparece el detalle en Transacciones;
   acá no aparece ni el saldo ni el bono. Que quede como en PAUTA: que aparezca quién reclama bono en plata,

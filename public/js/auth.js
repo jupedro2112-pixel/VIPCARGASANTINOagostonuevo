@@ -600,31 +600,31 @@ VIP.auth = (function () {
             ? VIP.state.currentUser.phone
             : null;
 
+        // #114: el teléfono es OPCIONAL en el cambio de contraseña (solo lo exige el
+        // retiro). Si ya está verificado, el campo ni se muestra.
         if (whatsappGroup) {
-            if (verifiedPhone) {
-                whatsappGroup.style.display = 'none';
-                if (whatsappInput) whatsappInput.removeAttribute('required');
-            } else {
-                whatsappGroup.style.display = '';
-                if (whatsappInput) whatsappInput.setAttribute('required', '');
-            }
+            whatsappGroup.style.display = verifiedPhone ? 'none' : '';
+            if (whatsappInput) whatsappInput.removeAttribute('required');
         }
         if (whatsappInfo) {
             whatsappInfo.style.display = verifiedPhone ? 'block' : 'none';
             whatsappInfo.textContent = verifiedPhone ? `✅ Teléfono verificado: ${verifiedPhone}` : '';
         }
+        const skipPhoneBtn = document.getElementById('changePasswordSkipPhoneBtn');
+        if (skipPhoneBtn) skipPhoneBtn.style.display = verifiedPhone ? 'none' : '';
 
-        // Campo "contraseña actual": se pide solo en el cambio voluntario con
-        // teléfono ya verificado (caso sin OTP). En el cambio obligatorio de
-        // primer ingreso o en el alta de teléfono (con OTP) no se pide.
+        // Campo "contraseña actual": se muestra en todo cambio VOLUNTARIO. El server
+        // la exige cuando no hay OTP de por medio (sin teléfono nuevo); si el usuario
+        // agrega un teléfono con OTP no hace falta, por eso no lleva `required`
+        // (la validación fina está en el submit). En el cambio obligatorio de
+        // primer ingreso no se pide.
         const currentPwGroup = document.getElementById('currentPasswordGroup');
         const currentPwInput = document.getElementById('currentPasswordInput');
-        const needCurrentPw = !VIP.state.passwordChangePending && !!verifiedPhone;
+        const needCurrentPw = !VIP.state.passwordChangePending;
         if (currentPwGroup) currentPwGroup.style.display = needCurrentPw ? '' : 'none';
         if (currentPwInput) {
             currentPwInput.value = '';
-            if (needCurrentPw) currentPwInput.setAttribute('required', '');
-            else currentPwInput.removeAttribute('required');
+            currentPwInput.removeAttribute('required');
         }
 
         // Reset del paso OTP: siempre arranca en paso 1 al abrir el modal.
@@ -662,8 +662,23 @@ VIP.auth = (function () {
     let _vipChangePwdPending = null;
     let _vipChangePwdResendTimer = null;
     // Recuerda si la entrada temporal pidió cerrar todas las sesiones, para
-    // forzar un re-login al cerrar el panel de resultado.
+    // forzar un re-login al cerrar el panel de resultado (solo fallback si el
+    // backend no devolviera el token fresco, #114).
     let _temporalCloseAllSessions = false;
+
+    // #114: "Omitir por ahora" el teléfono — flag de UN uso que prende el botón
+    // justo antes de disparar el submit del formulario.
+    let _skipPhoneOnce = false;
+    function skipPhoneAndContinue() {
+        const wpInput = document.getElementById('changePasswordWhatsApp');
+        if (wpInput) wpInput.value = '';
+        _skipPhoneOnce = true;
+        const form = document.getElementById('changePasswordForm');
+        if (form) {
+            if (typeof form.requestSubmit === 'function') form.requestSubmit();
+            else handleChangePassword(null);
+        }
+    }
 
     function _stopChangePwdResendCooldown() {
         if (_vipChangePwdResendTimer) {
@@ -728,9 +743,12 @@ VIP.auth = (function () {
             return;
         }
 
-        // Cambio voluntario con teléfono ya verificado → se exige la contraseña actual.
+        _skipPhoneOnce = false; // #114: el botón "Omitir" ya vació el teléfono; el submit sigue igual
+
+        // Cambio voluntario SIN teléfono nuevo (no hay OTP que pruebe identidad) →
+        // se exige la contraseña actual (el server lo rechaza igual si falta).
         const currentPassword = (document.getElementById('currentPasswordInput')?.value || '');
-        if (verifiedPhone && !VIP.state.passwordChangePending && !currentPassword) {
+        if (!VIP.state.passwordChangePending && !currentPassword && (verifiedPhone || !whatsappFull)) {
             errorDiv.textContent = 'Ingresá tu contraseña actual';
             errorDiv.classList.add('show');
             return;
@@ -751,15 +769,28 @@ VIP.auth = (function () {
             });
         }
 
-        // CASO B: se está agregando o cambiando teléfono → OTP obligatorio.
+        // #114: SIN teléfono → el teléfono es OPCIONAL en el cambio de contraseña
+        // (solo lo exige el retiro). Se guarda la clave y queda sin verificar: el
+        // banner "Verificá tu teléfono" sigue y el retiro lo pide sí o sí.
         if (!whatsappFull) {
-            errorDiv.textContent = 'El número de WhatsApp es obligatorio (más de 10 dígitos con prefijo internacional)';
-            errorDiv.classList.add('show');
+            const ok = await _commitPasswordChange({
+                newPassword,
+                closeAllSessions,
+                phone: null,
+                otpCode: null,
+                currentPassword,
+                errorDiv
+            });
+            if (ok && !verifiedPhone) {
+                VIP.ui.showToast('📱 Recordá: para RETIRAR vas a tener que verificar tu teléfono por SMS.', 'info');
+                try { if (VIP.auth.refreshVerifyPhoneBanner) VIP.auth.refreshVerifyPhoneBanner(); } catch (e) { /* opcional */ }
+            }
             return;
         }
+        // CASO B: se está agregando o cambiando teléfono → OTP obligatorio.
         const digits = whatsappFull.replace(/\D/g, '');
         if (digits.length <= 10) {
-            errorDiv.textContent = 'El número de WhatsApp es obligatorio (más de 10 dígitos con prefijo internacional)';
+            errorDiv.textContent = 'El número de WhatsApp debe tener más de 10 dígitos con prefijo internacional (o dejalo vacío para omitirlo)';
             errorDiv.classList.add('show');
             return;
         }
@@ -876,11 +907,21 @@ VIP.auth = (function () {
                 document.getElementById('closeAllSessions').checked = false;
 
                 if (closeAllSessions) {
-                    VIP.ui.showToast('🔒 Todas las sesiones han sido cerradas. Por favor, vuelve a iniciar sesión.', 'info');
-                    setTimeout(() => {
-                        localStorage.removeItem('userToken');
-                        location.reload();
-                    }, 2000);
+                    if (data && data.token) {
+                        // #114: el server emite un token FRESCO con el tokenVersion nuevo:
+                        // se cierran los DEMÁS dispositivos pero ESTA sesión sigue adentro.
+                        VIP.state.currentToken = data.token;
+                        localStorage.setItem('userToken', data.token);
+                        VIP.ui.showToast('🔒 Se cerraron las sesiones en los demás dispositivos. La tuya sigue activa.', 'success');
+                    } else {
+                        // Backend viejo sin token fresco: el JWT actual ya está muerto →
+                        // único camino, relogin (comportamiento anterior).
+                        VIP.ui.showToast('🔒 Todas las sesiones han sido cerradas. Por favor, vuelve a iniciar sesión.', 'info');
+                        setTimeout(() => {
+                            localStorage.removeItem('userToken');
+                            location.reload();
+                        }, 2000);
+                    }
                 }
                 return true;
             }
@@ -1036,7 +1077,19 @@ VIP.auth = (function () {
                 VIP.state.currentUser.phoneVerified = false;
                 VIP.state.currentUser.phoneVerificationPending = true;
             }
-            _temporalCloseAllSessions = !!_vipChangePwdPending.closeAllSessions;
+            // #114: token fresco del server → si cerró las otras sesiones, ESTA sigue
+            // viva. El flag de "desloguearse al cerrar el panel" queda solo como
+            // fallback para un backend viejo que no lo devuelva.
+            if (data && data.token) {
+                VIP.state.currentToken = data.token;
+                localStorage.setItem('userToken', data.token);
+                _temporalCloseAllSessions = false;
+                if (_vipChangePwdPending.closeAllSessions) {
+                    VIP.ui.showToast('🔒 Se cerraron las sesiones en los demás dispositivos. La tuya sigue activa.', 'success');
+                }
+            } else {
+                _temporalCloseAllSessions = !!_vipChangePwdPending.closeAllSessions;
+            }
             _vipChangePwdPending = null;
             _stopChangePwdResendCooldown();
 
@@ -1431,6 +1484,7 @@ VIP.auth = (function () {
         ensureUserLoaded,
         initializeSession,
         handleChangePassword,
+        skipPhoneAndContinue,
         handleChangePasswordOtpVerify,
         handleChangePasswordOtpResend,
         handleChangePasswordOtpBack,

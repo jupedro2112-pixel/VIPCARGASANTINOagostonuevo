@@ -475,6 +475,9 @@ function setupEventListeners() {
         if (cpTemporalBtn) cpTemporalBtn.addEventListener('click', VIP.auth.handleChangePasswordTemporalEntry);
         const cpTemporalOkBtn = document.getElementById('changePasswordTemporalOkBtn');
         if (cpTemporalOkBtn) cpTemporalOkBtn.addEventListener('click', VIP.auth.finishTemporalEntry);
+        // #114: "Omitir por ahora" el teléfono en el cambio de contraseña.
+        const cpSkipPhoneBtn = document.getElementById('changePasswordSkipPhoneBtn');
+        if (cpSkipPhoneBtn) cpSkipPhoneBtn.addEventListener('click', VIP.auth.skipPhoneAndContinue);
 
         // Settings — antes de abrir mostramos/escondemos el bloque de
         // "verificación pendiente" según el estado del user actual.

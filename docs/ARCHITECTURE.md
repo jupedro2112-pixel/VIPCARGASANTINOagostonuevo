@@ -152,6 +152,11 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   necesita otro campo, sumarlo ahí), chequea isActive/isBlocked/`tokenVersion`.
   publisher_admin: lockdown contra `PUBLISHER_ADMIN_ALLOWED_PATHS`. mustChangePassword:
   solo deja pasar `MUST_CHANGE_PASSWORD_ALLOWED_PATHS` (admins se auto-limpian).
+- Cambio de contraseña (`POST /api/auth/change-password`, variante temporal `/pending`):
+  el teléfono es OPCIONAL (#114; solo el retiro exige `phoneVerified`). Teléfono nuevo →
+  OTP `change-password`; sin teléfono y sin `mustChangePassword` → exige `currentPassword`.
+  `closeAllSessions` sube `tokenVersion` Y devuelve `token` fresco para que la sesión que
+  hizo el cambio siga viva (el front lo guarda; sin `token` cae al relogin).
 - Middlewares de rol: `adminMiddleware` (admin/depositor/withdrawer/comunidad),
   `depositorMiddleware` (admin/depositor/comunidad), `withdrawerMiddleware`
   (admin/withdrawer), `publisherAdminMiddleware`. Acciones sensibles re-chequean
