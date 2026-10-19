@@ -754,9 +754,10 @@ async function loadPaUsers(page = 1, search = '') {
             const infBadge = u.acquisitionInfluencer
                 ? `<span style="color:#6cf;font-size:10px;background:rgba(108,170,255,0.12);padding:1px 6px;border-radius:4px;margin-left:6px;white-space:nowrap;">🎬 ${_paSafe(u.acquisitionInfluencer)}</span>`
                 : '';
-            return `<div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:10px 12px;background:#1a1a2e;border-radius:6px;font-size:13px;">
+            return `<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:10px 12px;background:#1a1a2e;border-radius:6px;font-size:13px;">
                 <span style="color:#fff;font-weight:600;">${_paSafe(u.username)}${infBadge}</span>
                 <span style="color:#888;font-size:11px;white-space:nowrap;">${_paSafe(dateStr)}</span>
+                <button onclick="paGenerateAccessLink('${_paSafe(u.id)}','${_paSafe(u.username)}')" title="Generar link de acceso (un solo uso — entra a la cuenta sin contraseña)" style="padding:6px 12px;background:rgba(0,255,136,0.10);border:1px solid #00c853;color:#7fe07f;border-radius:5px;cursor:pointer;font-size:11px;white-space:nowrap;">🔗 Link</button>
                 <button onclick="openPaChangePwdModal('${_paSafe(u.id)}','${_paSafe(u.username)}')" style="padding:6px 12px;background:rgba(212,175,55,0.15);border:1px solid #d4af37;color:#d4af37;border-radius:5px;cursor:pointer;font-size:11px;white-space:nowrap;">🔑 Contraseña</button>
             </div>`;
         }).join('');
@@ -926,8 +927,15 @@ async function paCreateUser() {
             return;
         }
         if (okBox) {
-            okBox.textContent = `✓ Usuario "${data.user.username}" creado correctamente. Pasale los datos por WhatsApp.`;
+            okBox.textContent = data.accessLink
+                ? `✓ Usuario "${data.user.username}" creado correctamente. Pasale el LINK DE ACCESO (se abrió en el recuadro).`
+                : `✓ Usuario "${data.user.username}" creado correctamente. Pasale los datos por WhatsApp.`;
             okBox.style.display = 'block';
+        }
+        // #112: link de acceso de un solo uso generado en el alta: mostrarlo para
+        // copiar (mismo modal que usa el alta del admin general).
+        if (data.accessLink) {
+            showAccessLinkModal(data.accessLink, data.user.username, '✅ Usuario creado. Pasale este link: entra solo y crea su contraseña.');
         }
         usernameEl.value = '';
         passwordEl.value = '';
@@ -947,8 +955,30 @@ async function paCreateUser() {
         if (btn) { btn.disabled = false; btn.textContent = 'Crear usuario'; }
     }
 }
+// #112: (re)genera el link de acceso de un solo uso de un usuario del publicista.
+// Reusa el modal del flujo del admin general (showAccessLinkModal).
+async function paGenerateAccessLink(userId, username) {
+    if (!confirm(`¿Generar un link de acceso para ${username}?\n\nEl link entra a la cuenta SIN contraseña, sirve UNA sola vez y vence.\nMandáselo solo a esa persona.\n\nSi ya le habías generado uno, el anterior deja de funcionar.`)) return;
+    try {
+        const r = await fetch(`${API_URL}/api/admin/publisher-admin/users/${encodeURIComponent(userId)}/access-link`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Authorization': `Bearer ${currentToken}` }
+        });
+        const j = await r.json();
+        if (!r.ok || !j.success) {
+            showToast(j.error || 'No se pudo generar el link', 'error');
+            return;
+        }
+        showAccessLinkModal(j.link, username, '');
+    } catch (e) {
+        showToast('Error de conexión', 'error');
+    }
+}
+
 // Exponer al global scope para los onclick="" del HTML
 window.paCreateUser = paCreateUser;
+window.paGenerateAccessLink = paGenerateAccessLink;
 window.loadPaUsers = loadPaUsers;
 window.paUsersSearchSubmit = paUsersSearchSubmit;
 window.paUsersClearSearch = paUsersClearSearch;
@@ -4035,6 +4065,11 @@ function renderUsers(users) {
               '</div>'
             : '';
 
+        // #112: link de acceso de un solo uso — admin general y depositor, solo clientes.
+        const accessLinkBtn = (['admin', 'depositor'].includes(adminRole) && !isAdminUser)
+            ? `<button class="action-btn-small" title="Generar link de acceso (un solo uso — entra a la cuenta sin contraseña)" onclick='handleGenerateAccessLink(${JSON.stringify(user.id)}, ${JSON.stringify(user.username)})'>🔗</button>`
+            : '';
+
         return `
         <tr class="${isAdminUser ? 'admin-row' : ''}">
             <td>${escapeHtml(user.username)}${tagsHtml}</td>
@@ -4057,10 +4092,87 @@ function renderUsers(users) {
                 </button>
                 ${pwdBtn}
                 ${blockBtn}
+                ${accessLinkBtn}
             </td>
         </tr>
         `;
     }).join('');
+}
+
+// ============================================
+// LINK DE ACCESO DE UN SOLO USO (#112, réplica #111 de PAUTANUEVAsantino)
+// ============================================
+// El agente genera un link que loguea al cliente automáticamente al abrirlo
+// (un solo uso, vence a las 72 h). Regenerar pisa el anterior. El cliente, al
+// entrar, tiene que crear su contraseña nueva (mustChangePassword).
+
+async function handleGenerateAccessLink(userId, username) {
+    if (!confirm(`¿Generar un link de acceso para ${username}?\n\nEl link entra a la cuenta SIN contraseña, sirve UNA sola vez y vence.\nMandáselo solo a esa persona.\n\nSi ya le habías generado uno, el anterior deja de funcionar.`)) return;
+    await generateAccessLink(userId, username, '');
+}
+
+async function generateAccessLink(userId, username, note) {
+    try {
+        const r = await authFetch(`/api/admin/users/${encodeURIComponent(userId)}/access-link`, { method: 'POST' });
+        const j = await r.json();
+        if (!r.ok || !j.success) {
+            showToast(j.error || 'No se pudo generar el link', 'error');
+            return;
+        }
+        showAccessLinkModal(j.link, username, note);
+    } catch (e) {
+        showToast('Error de conexión', 'error');
+    }
+}
+
+// Modal con el link listo para copiar y pegar en WhatsApp. Al abrirse intenta
+// copiarlo solo al portapapeles (por eso el botón dice "Copiar de nuevo").
+function showAccessLinkModal(link, username, note) {
+    let overlay = document.getElementById('accessLinkModal');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'accessLinkModal';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:11000;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;padding:16px;';
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+        document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `
+        <div style="background:#1e2130;border:1px solid rgba(255,255,255,0.12);border-radius:12px;max-width:480px;width:100%;padding:18px 20px;box-shadow:0 20px 50px rgba(0,0,0,0.6);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                <h3 style="color:#fff;margin:0;font-size:17px;">🔗 Link de acceso</h3>
+                <button onclick="document.getElementById('accessLinkModal').style.display='none'" title="Cerrar" style="background:none;border:none;color:#999;font-size:18px;cursor:pointer;line-height:1;">✕</button>
+            </div>
+            ${note ? `<p style="color:#7fe07f;font-size:12.5px;margin:0 0 8px;">${escapeHtml(note)}</p>` : ''}
+            <p style="color:#ddd;font-size:13px;margin:0 0 6px;">Usuario: <b style="color:#f0a830;">${escapeHtml(username)}</b></p>
+            <p style="color:#ddd;font-size:13px;margin:0 0 8px;">Mandale este link por WhatsApp</p>
+            <textarea id="accessLinkText" readonly onclick="this.select()" style="width:100%;box-sizing:border-box;min-height:74px;resize:vertical;background:#13151f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#fff;font-size:12.5px;padding:10px;font-family:monospace;word-break:break-all;">${escapeHtml(link)}</textarea>
+            <p style="color:#999;font-size:11.5px;line-height:1.5;margin:10px 0 14px;">
+                Entra a la cuenta <b>sin contraseña</b>, sirve <b>una sola vez</b> y vence en 72 h. Al abrirlo, el usuario tiene
+                que crear su contraseña. Si generás otro link, éste deja de funcionar.
+            </p>
+            <div style="display:flex;gap:10px;justify-content:flex-end;">
+                <button onclick="document.getElementById('accessLinkModal').style.display='none'" style="background:#2a2d3e;color:#fff;border:1px solid rgba(255,255,255,0.15);padding:10px 18px;border-radius:8px;font-weight:700;cursor:pointer;">Cerrar</button>
+                <button onclick="copyAccessLink()" style="background:#5b4fe9;color:#fff;border:none;padding:10px 18px;border-radius:8px;font-weight:700;cursor:pointer;">📋 Copiar de nuevo</button>
+            </div>
+        </div>`;
+    overlay.style.display = 'flex';
+    copyAccessLink(true);
+}
+
+function copyAccessLink(silentOnFail) {
+    const el = document.getElementById('accessLinkText');
+    if (!el) return;
+    const text = el.value || el.textContent || '';
+    const ok = () => showToast('Link copiado — pegalo en WhatsApp', 'success');
+    const fail = () => { if (!silentOnFail) showToast('No se pudo copiar — seleccionalo y copialo a mano', 'error'); };
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(ok, fail);
+        } else {
+            el.select();
+            document.execCommand('copy') ? ok() : fail();
+        }
+    } catch (e) { fail(); }
 }
 
 // ============================================
@@ -5073,6 +5185,15 @@ async function handleCreateUser() {
             document.getElementById('newUserEmail').value = '';
             document.getElementById('newUserPhone').value = '';
             document.getElementById('newUserRole').value = 'user';
+            // #112: link de acceso de un solo uso del recién creado (solo clientes).
+            // El backend lo genera en el alta; si no vino, se pide aparte.
+            if (data.user && data.user.role === 'user') {
+                if (data.accessLink) {
+                    showAccessLinkModal(data.accessLink, data.user.username, '✅ Usuario creado. Este es su link para entrar por primera vez:');
+                } else if (currentAdmin && ['admin', 'depositor'].includes(currentAdmin.role)) {
+                    generateAccessLink(data.user.id, data.user.username, '✅ Usuario creado. Este es su link para entrar por primera vez:');
+                }
+            }
         } else {
             showToast(data.error || 'Error al crear usuario', 'error');
         }

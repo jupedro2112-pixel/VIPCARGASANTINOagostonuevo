@@ -139,6 +139,24 @@ const userSchema = new mongoose.Schema({
     type: Number, 
     default: 0 
   },
+
+  // ============================================
+  // LINK DE ACCESO DE UN SOLO USO (#112, réplica #111 de PAUTANUEVAsantino)
+  // ============================================
+  // Se guarda SOLO el hash sha256 del token — el link en claro lo ve únicamente
+  // el agente al generarlo (un dump de la base no regala logins). Al canjearse se
+  // borra en el MISMO findOneAndUpdate (un solo uso, a prueba de carreras).
+  // Regenerar desde el panel pisa el hash → el link anterior muere solo.
+  // Vence a las 72 h de generado (se chequea por accessLinkCreatedAt al canjear).
+  accessLinkHash: {
+    type: String,
+    default: null,
+    index: true
+  },
+  accessLinkCreatedAt: {
+    type: Date,
+    default: null
+  },
   
   // Campos JUGAYGANA
   jugayganaUserId: { 

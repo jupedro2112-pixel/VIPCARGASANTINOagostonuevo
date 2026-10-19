@@ -428,6 +428,57 @@ VIP.auth = (function () {
         }
     }
 
+    // ============================================
+    // LINK DE ACCESO DE UN SOLO USO (?acceso=<token>) — #112
+    // ============================================
+    // El agente genera el link desde el panel; el cliente lo abre y entra logueado
+    // automáticamente. El link muere al canjearse (single use, lo garantiza el
+    // backend) y el usuario queda con mustChangePassword → verifyToken() le abre
+    // el recuadro de crear su contraseña nueva (flujo existente).
+    async function tryAccessLink() {
+        let token = null;
+        try { token = new URLSearchParams(window.location.search).get('acceso'); } catch (e) {}
+        if (!token) return false;
+
+        // Sacar el token de la URL YA MISMO (antes de cualquier request): es de
+        // un solo uso y no tiene que quedar en el historial ni compartirse. Se
+        // conservan los demás parámetros (?ref=, ?p=…) que app.js lee después.
+        try {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('acceso');
+            const qs = url.searchParams.toString();
+            history.replaceState(null, '', url.pathname + (qs ? '?' + qs : '') + url.hash);
+        } catch (e) {}
+
+        try {
+            const response = await fetch(`${VIP.config.API_URL}/api/auth/access-link`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token })
+            });
+            const data = await response.json();
+            if (response.ok && data.token) {
+                // Si en este dispositivo había OTRA sesión viva (socket/usuario
+                // anterior), cerrarla ANTES de asumir la nueva: el socket viejo
+                // seguiría autenticado como el usuario anterior.
+                if (VIP.state.socket || VIP.state.currentUser) {
+                    try { VIP.socket.stopMessagePolling(); } catch (e) {}
+                    VIP.state.currentUser = null;
+                    VIP.state.socketAuthed = false;
+                }
+                VIP.state.currentToken = data.token;
+                localStorage.setItem('userToken', data.token);
+                VIP.state.jugayganaToken = null;
+                try { sessionStorage.removeItem('jugayganaToken'); } catch (e) {}
+                return true; // el caller sigue con verifyToken() → sesión completa
+            }
+            VIP.ui.showToast(data.error || 'Este link de acceso ya fue usado o no es válido.', 'error');
+        } catch (e) {
+            VIP.ui.showToast('Error de conexión al validar tu link de acceso. Probá de nuevo.', 'error');
+        }
+        return false;
+    }
+
     function handleLogout() {
         // Avisar al backend para limpiar el token FCM de este dispositivo, así
         // las notificaciones del próximo user no se entregan a la sesión cerrada.
@@ -1375,6 +1426,7 @@ VIP.auth = (function () {
         handleVerifyPhoneConfirm,
         handleLogin,
         verifyToken,
+        tryAccessLink,
         handleLogout,
         ensureUserLoaded,
         initializeSession,

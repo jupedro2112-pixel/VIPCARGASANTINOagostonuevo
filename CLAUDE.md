@@ -65,7 +65,9 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   retiros), `publisher_admin` (solo crea usuarios de su publicista — lockdown via
   `PUBLISHER_ADMIN_ALLOWED_PATHS`).
 - **Auth:** JWT por header Authorization O por cookie httpOnly `admin_api_session`
-  (el panel admin usa cookie).
+  (el panel admin usa cookie). Link de acceso de un solo uso `?acceso=<token>` (#112):
+  sólo se guarda el hash; el canje (`POST /api/auth/access-link`) es atómico, vence a 72 h
+  y fuerza `mustChangePassword`.
 - **Mensajes automáticos al usuario** son editables desde la sección COMANDOS
   (comandos `/sys_*`). Usar el helper `renderSystemCommand(name, fallback, vars)` para
   cualquier mensaje automático nuevo.

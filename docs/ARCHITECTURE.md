@@ -213,6 +213,14 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
     `depositToUser`/`withdrawFromUser`. ⚠️ Consecuencia de diseño (preexistente): un
     username que ya existe en JUGAYGANA se vincula a la cuenta de plataforma existente,
     con el saldo y la contraseña que esa cuenta ya tenía.
+- **Link de acceso de un solo uso** (#112, réplica #111 de PAUTANUEVAsantino): el agente
+  (admin/depositor, o publisher_admin solo para usuarios que creó) genera
+  `PUBLIC_BASE_URL/?acceso=<token>` con `issueAccessLinkFor` (se guarda SOLO el sha256 en
+  `User.accessLinkHash` + `accessLinkCreatedAt`); el alta de clientes lo devuelve como
+  `accessLink`. `POST /api/auth/access-link` (público, authLimiter) canjea: `findOneAndUpdate`
+  atómico que exige ≤72 h, borra el hash y fuerza `mustChangePassword:true` → JWT 30 d. La PWA
+  (`VIP.auth.tryAccessLink`, primero en app.js) saca `?acceso=` de la URL antes de canjear y
+  sigue con `verifyToken()` (recuadro obligatorio de contraseña). Regenerar pisa el hash.
 - **Login**: `POST /api/auth/login` (~L3341). `findUserByUsernameCI` con
   `critical:true` (fallback regex SIEMPRE disponible — nadie queda afuera). Importa de
   JUGAYGANA si no existe local. Soporta login por teléfono, OTP y `temporaryCode`.
@@ -412,6 +420,9 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   dismiss/sync, promo bonus — `loadChatPromoBonus`: verde = lo aplica el agente +
   "Marcar usado"; azul ⚡ = bono de lote AUTOMÁTICO, informativo + "Cancelar bono"). Races protegidas por `activeConversationId` +
   AbortController — **no romper ese patrón**.
+- Usuarios: botón 🔗 por cliente (admin/depositor) → `handleGenerateAccessLink` →
+  `showAccessLinkModal` (#112; el alta lo abre solo con el `accessLink` de la respuesta). El
+  publisher_admin tiene "🔗 Link" en "Mis usuarios" (`paGenerateAccessLink`).
 - Sección Notificaciones: card "🎁 Lote con regalo" + "📤 Lotes enviados" (#103;
   `previewGiftBatch`/`sendGiftBatch`/`genGiftBatchCode`/`loadNotifBatches`/
   `toggleNotifBatchDetail` van por onclick inline). Socket `security_alert` → toast rojo.

@@ -10731,8 +10731,20 @@ app.post('/api/admin/publisher-admin/create-user', authMiddleware, publisherAdmi
       `${chosenInfluencer ? `, influencer=${chosenInfluencer}` : ''}) creó usuario ${username}`
     );
 
+    // #112: link de acceso de un solo uso generado en el ALTA: el publicista se
+    // lo pasa al cliente y entra logueado automático, igual que el alta del
+    // admin general. Si falla, el usuario igual quedó creado (se regenera con
+    // 🔗 Link en "Mis usuarios").
+    let accessLink = null;
+    try {
+      accessLink = await issueAccessLinkFor(newUser.id);
+    } catch (linkErr) {
+      logger.warn(`[publisher_admin create-user] no se pudo generar el access-link de ${username}: ${linkErr.message}`);
+    }
+
     res.status(201).json({
       message: 'Usuario creado exitosamente',
+      accessLink,
       user: {
         id: newUser.id,
         username: newUser.username,
@@ -10900,6 +10912,39 @@ app.get('/api/admin/publisher-admin/users', authMiddleware, publisherAdminMiddle
 // El publisher_admin puede cambiar la contraseña de los usuarios que ÉL creó.
 // Doble check de seguridad: target.createdByEmployeeId === employee.id Y
 // target.role === 'user'. Sincroniza a JUGAYGANA en background (best-effort).
+// POST /api/admin/publisher-admin/users/:userId/access-link (#112)
+// El publisher_admin (re)genera el link de acceso de UN SOLO USO — pero SOLO de
+// usuarios que ÉL creó (mismo doble check que change-password). La ruta cae bajo
+// el prefijo /api/admin/publisher-admin del lockdown, así que no hay que tocar
+// PUBLISHER_ADMIN_ALLOWED_PATHS.
+app.post('/api/admin/publisher-admin/users/:userId/access-link', authMiddleware, publisherAdminMiddleware, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const employee = await User.findOne({ id: req.user.userId }).lean();
+    if (!employee || !employee.publisherCampaignCode) {
+      return res.status(403).json({ error: 'Cuenta no válida' });
+    }
+    const target = await User.findOne({ id: userId }).select('id username role isBlocked isActive createdByEmployeeId').lean();
+    if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
+    // SEGURIDAD: sólo usuarios que vos creaste, y sólo cuentas de cliente.
+    if (target.createdByEmployeeId !== employee.id) {
+      return res.status(403).json({ error: 'Sólo podés generar links de usuarios que vos creaste' });
+    }
+    if (target.role !== 'user') {
+      return res.status(403).json({ error: 'Solo se pueden generar links para cuentas de clientes.' });
+    }
+    if (target.isBlocked || target.isActive === false) {
+      return res.status(400).json({ error: 'La cuenta está bloqueada o inactiva — no se puede generar el link.' });
+    }
+    const link = await issueAccessLinkFor(userId);
+    logger.info(`[access-link] link generado para ${target.username} por publisher_admin ${employee.username}`);
+    res.json({ success: true, link, username: target.username, expiresInHours: 72 });
+  } catch (error) {
+    logger.error(`[publisher_admin access-link] ${error.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
 app.post('/api/admin/publisher-admin/users/:userId/change-password', authMiddleware, publisherAdminMiddleware, async (req, res) => {
   try {
     const { userId } = req.params;
@@ -14220,9 +14265,22 @@ app.post('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) =
     // se crea recién cuando el usuario ingresa o envía su primer mensaje, para
     // no llenar el panel de chats vacíos de usuarios que nunca entraron.
 
+    // #112: link de acceso de un solo uso generado en el ALTA (solo clientes):
+    // el agente se lo pasa por WhatsApp y el cliente entra logueado automático.
+    // Si falla, el usuario igual quedó creado (se regenera con 🔗 en Usuarios).
+    let accessLink = null;
+    if (role === 'user') {
+      try {
+        accessLink = await issueAccessLinkFor(newUser.id);
+      } catch (linkErr) {
+        logger.warn(`[admin create-user] no se pudo generar el access-link de ${newUser.username}: ${linkErr.message}`);
+      }
+    }
+
     res.status(201).json({
       success: true,
       message: role === 'user' ? 'Usuario creado correctamente' : 'Administrador creado correctamente',
+      accessLink,
       user: {
         id: newUser.id,
         username: newUser.username,
@@ -14232,6 +14290,95 @@ app.post('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) =
     });
   } catch (error) {
     console.error('Error creando usuario:', error);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// ============================================
+// LINK DE ACCESO DE UN SOLO USO (#112, réplica #111 de PAUTANUEVAsantino)
+// ============================================
+// El agente genera un link `https://vipcargas.com/?acceso=<token>`; el cliente lo
+// abre y entra LOGUEADO automáticamente, el link muere en ese momento (un solo
+// uso), vence a las 72 h si nadie lo abre, y al entrar se le exige crear una
+// contraseña nueva (mustChangePassword — flujo existente de la PWA). Regenerar
+// desde el panel pisa el hash → el link anterior deja de servir.
+const ACCESS_LINK_TTL_MS = 72 * 60 * 60 * 1000;
+
+// Genera (o regenera) el link para un usuario: guarda SOLO el sha256 del token
+// (un dump de la base no regala logins) y devuelve el link en claro. Lo usan el
+// alta y el botón 🔗 del admin/depositor, y el alta + botón del publisher_admin.
+async function issueAccessLinkFor(userId) {
+  // 24 bytes random → 32 chars URL-safe (192 bits: no se puede adivinar).
+  const token = crypto.randomBytes(24).toString('base64url');
+  const hash = crypto.createHash('sha256').update(token).digest('hex');
+  await User.updateOne({ id: userId }, { $set: { accessLinkHash: hash, accessLinkCreatedAt: new Date() } });
+  return `${PUBLIC_BASE_URL}/?acceso=${token}`;
+}
+
+app.post('/api/admin/users/:userId/access-link', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    // Admin general y depositor (los depositors también dan de alta clientes).
+    // withdrawer/comunidad NO; el publisher_admin tiene su ruta propia (solo
+    // usuarios que él creó).
+    if (!['admin', 'depositor'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Solo el admin general o un depositor pueden generar links de acceso.' });
+    }
+    const { userId } = req.params;
+    const user = await User.findOne({ id: userId }).select('id username role isBlocked isActive').lean();
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (user.role !== 'user') return res.status(400).json({ error: 'Solo se pueden generar links para cuentas de clientes.' });
+    if (user.isBlocked) return res.status(400).json({ error: 'La cuenta está bloqueada — desbloqueala antes de generar el link.' });
+    if (user.isActive === false) return res.status(400).json({ error: 'La cuenta está inactiva — no se puede generar el link.' });
+
+    const link = await issueAccessLinkFor(userId);
+    logger.info(`[access-link] link generado para ${user.username} por ${req.user.username}`);
+    res.json({ success: true, link, username: user.username, expiresInHours: 72 });
+  } catch (error) {
+    console.error('Error generando link de acceso:', error);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// Canje del link (público, rate-limiteado). UN SOLO USO a prueba de carreras: el
+// findOneAndUpdate borra el hash y fuerza mustChangePassword en el MISMO paso —
+// dos aperturas simultáneas → una sola gana. Emite el mismo JWT de 30 d del
+// login. Error genérico a propósito (no revela si el link existió, venció o la
+// cuenta está bloqueada).
+app.post('/api/auth/access-link', authLimiter, async (req, res) => {
+  try {
+    const token = String((req.body && req.body.token) || '').trim();
+    if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) {
+      return res.status(400).json({ error: 'Este link de acceso no es válido.' });
+    }
+    const hash = crypto.createHash('sha256').update(token).digest('hex');
+    const user = await User.findOneAndUpdate(
+      {
+        accessLinkHash: hash,
+        role: 'user',
+        isActive: { $ne: false },
+        isBlocked: { $ne: true },
+        accessLinkCreatedAt: { $gte: new Date(Date.now() - ACCESS_LINK_TTL_MS) }
+      },
+      { $set: { accessLinkHash: null, mustChangePassword: true, lastLogin: new Date() } },
+      { new: true }
+    ).select('id username role tokenVersion').lean();
+
+    if (!user) {
+      return res.status(401).json({ error: 'Este link de acceso ya fue usado, venció o no es válido. Pedile uno nuevo al soporte.' });
+    }
+
+    const jwtToken = jwt.sign(
+      { userId: user.id, username: user.username, role: user.role, tokenVersion: user.tokenVersion ?? 0 },
+      JWT_SECRET,
+      { expiresIn: '30d' }
+    );
+    logger.info(`[access-link] canjeado por ${user.username}`);
+    res.json({
+      token: jwtToken,
+      user: { id: user.id, username: user.username, role: user.role, mustChangePassword: true }
+    });
+  } catch (error) {
+    console.error('Error canjeando link de acceso:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });

@@ -4,7 +4,46 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-16**
+> **Última actualización: 2026-10-19**
+
+## Sesión 2026-10-19
+
+### 112. 🔗 Link de acceso de UN SOLO USO (entra sin contraseña) — réplica #111 de PAUTANUEVAsantino
+- **Owner (capturas del panel de AUTOREEMBOLSOS):** "agarrá de PAUTANUEVAsantino el link de inicio de
+  sesión automático y replicalo acá: que se genere solo al crear un usuario nuevo y aparezca para copiar
+  y pegar, y que desde Usuarios se pueda regenerar".
+- **Modelo (`User`):** `accessLinkHash` (sha256 del token, indexado) + `accessLinkCreatedAt`. Nunca se
+  guarda el token en claro (un dump de la base no regala logins).
+- **Backend (`server.js`, bloque "LINK DE ACCESO DE UN SOLO USO" después del alta de usuarios):**
+  - `issueAccessLinkFor(userId)` → token de 24 bytes random base64url (192 bits), guarda el hash + fecha
+    y devuelve `${PUBLIC_BASE_URL}/?acceso=<token>`. Regenerar pisa el hash → el anterior muere.
+  - `POST /api/admin/users/:userId/access-link` — **admin general y depositor**; solo cuentas `role:'user'`
+    activas y no bloqueadas. Devuelve `{link, username, expiresInHours:72}`.
+  - `POST /api/admin/publisher-admin/users/:userId/access-link` — el publicista SOLO para usuarios que él
+    creó (`createdByEmployeeId`), mismo doble check que su change-password; cae bajo el prefijo del lockdown.
+  - `POST /api/auth/access-link` (público, `authLimiter`): canje **single-use a prueba de carreras** — el
+    `findOneAndUpdate` exige `accessLinkCreatedAt ≥ ahora − 72 h`, borra el hash y setea
+    `mustChangePassword:true` + `lastLogin` en el MISMO paso (dos aperturas simultáneas → una sola gana).
+    Emite el mismo JWT de 30 d del login. Error 401 genérico (no revela si existió, venció o está bloqueada).
+  - **Alta:** `POST /api/admin/users` (solo `role:'user'`) y `POST /api/admin/publisher-admin/create-user`
+    generan el link y lo devuelven como `accessLink` (si falla, el usuario igual queda creado).
+- **PWA (`?v=58`, SW v58):** `VIP.auth.tryAccessLink()` corre PRIMERO en el arranque (app.js): lee
+  `?acceso=`, lo saca de la URL con `replaceState` ANTES de cualquier request (conserva `?ref=`/`?p=`),
+  canjea, cierra la sesión previa del dispositivo si la había, guarda el JWT y deja que `verifyToken()`
+  complete la sesión — el flujo existente de `mustChangePassword` abre solo el recuadro obligatorio de
+  contraseña nueva (en este repo, sin teléfono verificado pide teléfono + OTP, como cualquier primer ingreso).
+- **Panel (admin-sw v36):** al crear un cliente (admin/depositor) se abre el modal "🔗 Link de acceso"
+  (usuario, textarea con el link, "Mandale este link por WhatsApp", leyenda de un solo uso/72 h, botones
+  Cerrar / 📋 Copiar de nuevo; intenta copiar solo al abrirse). En la tabla de Usuarios, botón 🔗 por
+  cliente (= regenerar, con confirm). Publicista: el alta muestra el mismo modal y "Mis usuarios" tiene
+  "🔗 Link" por usuario (`paGenerateAccessLink`).
+- **Diferencias respecto del origen:** PAUTANUEVA no vence el link y trae lógica de landing/casino (#309,
+  `ir=casino`, discard/account-replaced) que acá no existe → no se portó. El vencimiento de 72 h sale de
+  las capturas del owner (versión de AUTOREEMBOLSOS).
+- **Validado:** `node --check` OK (server.js, User.js, auth.js, app.js, admin.js, ambos SW). Sin runtime.
+  **Back necesita redeploy.** PROBAR: crear un cliente desde el panel → se abre el modal con el link →
+  abrirlo en incógnito (entra logueado + recuadro de contraseña) → abrirlo de nuevo (rechazado) → 🔗 en
+  Usuarios regenera y el link viejo ya no sirve; lo mismo desde una cuenta publicista.
 
 ## Sesión 2026-10-16
 

@@ -34,7 +34,7 @@ try {
 // ============================================
 // CONFIGURACIÓN DE CACHÉ
 // ============================================
-const CACHE_VERSION = 'v57'; // v57: soporte del login sin link fijo + 💬 dinámico, rangos con 3 % (#108) // v56: card de referidos compacta (v55: referidos nuevos; v54: botón Reclamar de regalos de fichas; v53: botón 🎁 + modal Regalos con código; v52: vuelve el reembolso diario; v51: rangos + cupón install 100%; v50: stale-while-revalidate js/css)
+const CACHE_VERSION = 'v58'; // v58: link de acceso de un solo uso ?acceso= (#112) // v57: soporte del login sin link fijo + 💬 dinámico, rangos con 3 % (#108) // v56: card de referidos compacta (v55: referidos nuevos; v54: botón Reclamar de regalos de fichas; v53: botón 🎁 + modal Regalos con código; v52: vuelve el reembolso diario; v51: rangos + cupón install 100%; v50: stale-while-revalidate js/css)
 const CACHE_NAME = 'sala-juegos-fcm-' + CACHE_VERSION;
 
 // Logs por-fetch del SW (corren en CADA request). Apagados por default;
