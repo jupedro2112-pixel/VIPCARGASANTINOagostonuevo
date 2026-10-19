@@ -157,6 +157,14 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+
+  // #113 RULETA DIARIA v2 (réplica #254/#303/#305 de PAUTANUEVAsantino): premio
+  // "% EXTRA en la próxima carga" pendiente. Lo consume la próxima carga (manual
+  // sin bonus del agente / hgcash) con reserva atómica (pct>0 → 0) y reversión si
+  // el crédito falla limpio. Vence a las 24 h del giro (dailyRouletteWonAt).
+  dailyRoulettePendingPct: { type: Number, default: 0 },
+  dailyRoulettePendingLabel: { type: String, default: null },
+  dailyRouletteWonAt: { type: Date, default: null },
   
   // Campos JUGAYGANA
   jugayganaUserId: { 

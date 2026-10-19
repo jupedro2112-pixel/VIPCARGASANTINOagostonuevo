@@ -132,7 +132,10 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   por voto de encuesta — APAGADA), **EncuestaVote/EncuestaFire** (motor encuesta —
   bonos apagados), **InactividadFire** (motor inactivos — APAGADO).
 - **DailyRouletteSpin** — 1 giro/día (índices únicos userId+dateKey y
-  username+dateKey). Auto-crédito en JUGAYGANA; `credit_failed` → retry desde panel.
+  username+dateKey). `prizeType` cash|percent|none (#113). Cash: auto-crédito en JUGAYGANA
+  + Transaction `source:'daily_roulette'`; `credit_failed` → retry desde panel. Percent:
+  `percent_pending` → `percent_used` (usedAt/usedBy/usedOnAmount/usedBonusARS) o
+  `percent_expired` (24 h). El % vigente vive en `User.dailyRoulettePendingPct/Label/WonAt`.
 - **Review** (1 por user, moderada), **OtpCode** (TTL 5 min, hash bcrypt, 3 intentos),
   **FbAdsWebhookQueue** (cola de reintentos al sistema externo fb-ads),
   **RefundClaim** (índice único userId+type+periodKey contra doble cobro),
@@ -316,9 +319,19 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
   `GET /api/admin/referrals/:userId/netwin` (en vivo, tope 80), `GET/POST
   /api/admin/referral-rate`, `GET/POST /api/admin/referrals/milestones-config`.
   `POST /api/referrals/milestones/claim` → 410 (sin premios en plata). Ver §4 y gotchas.
-- **Ruleta diaria**: requiere PWA instalada (token FCM standalone) + cliente activo
-  (>10 cargas reales/30d). Pick ponderado + **budget pacing** (distribuye el
-  presupuesto diario por hora ART; si excede → fuerza SIN PREMIO). Auto-crédito.
+- **Ruleta diaria (v2, #113)**: premios y gates desde `Config['dailyRoulette']`
+  (`GET/POST /api/admin/daily-roulette`): `enabled` (default OFF), `requireDeposits` en
+  los últimos `depositDays` días (0 = histórico; cuenta `deposit` sin regalos),
+  `requireAppInstalled`, `prizes[]` {type cash|percent|none, value, weight}. Pick
+  ponderado + **budget pacing** (solo premios cash; si excede → "sin premio"/primer %).
+  Cash → `creditUserBalance` + Transaction bonus `source:'daily_roulette'`. Percent →
+  pendiente 24 h en el User; lo consume la próxima carga vía
+  `_applyDailyRoulettePctOnDeposit` (reserva atómica → tope del lote →
+  `creditUserBalanceVerified` → Transaction `appliedOnDeposit:true` + spin `percent_used`).
+  Enganchado en `/api/admin/deposit` (sin bonus del agente, ANTES del lote, misma carrera
+  `LOTE_MANUAL_WAIT_MS`) y en `hgcashAutoCarga` (tras el bono app, antes del lote). Bonus
+  manual del agente consume el % pendiente (bono 0). `POST /api/admin/roulette/reset-user`
+  borra el giro de hoy + % pendiente de UN usuario.
 - **Fueguito**: reclamo diario sin requisitos; premios de hitos (editables en panel,
   Config['fireMilestones']) exigen actividad de cargas y expiran el mismo día.
 - **Bono instalación** (desde 2026-07-28 = **cupón 100% EXTRA en la próxima carga**,
@@ -457,6 +470,7 @@ NUNCA asumir respuesta inmediata; reusar estos clientes.
 | `_processNotifBatchQueue` (envío de lotes con regalo) | 45 s (+ `setImmediate` al crear un lote) | activo | claim atómico por destinatario en `NotifBatch.recipients` (`delivery:null→'sending'`; los colgados >10 min se retoman) |
 | `fbAdsWebhook.startWorker` | 5 min | activo | nextRetryAt |
 | Limpieza mensajes >3d | 6 h | activo (red de seguridad del TTL) | deleteMany |
+| `_expireDailyRoulettePct` (vence el % EXTRA de la ruleta a las 24 h) | 15 min | activo | updateOne con guard por valor (pct actual) |
 
 Migraciones one-shot: patrón flag en Config (`migration_*_done`) en `initializeData()`.
 El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
@@ -537,8 +551,8 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   el inline: cambiar en ambos lados.
 - **`creditUserBalance` (histórico) REENVÍA ante HTML/timeout** (hasta 3 intentos +
   reintento inline): puede acreditar doble si JUGAYGANA procesó y respondió HTML. Lo
-  usan reembolsos, ruleta, fueguito y el bonus manual (riesgo aceptado, #101). Los lotes
-  usan `creditUserBalanceVerified`. Migrar el resto es una tanda aparte (cada caller
+  usan reembolsos, ruleta (premio cash), fueguito y el bonus manual (riesgo aceptado, #101).
+  Los lotes y el % EXTRA de la ruleta (#113) usan `creditUserBalanceVerified`. Migrar el resto es una tanda aparte (cada caller
   tiene que aprender a manejar `ambiguous`).
 - **`isSessionError()` devuelve true para HTML**: en un flujo de plata, evaluar
   `isHtmlBlocked` ANTES (si no, "renovar sesión + reenviar" es un reenvío a ciegas).

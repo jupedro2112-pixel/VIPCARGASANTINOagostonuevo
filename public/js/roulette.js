@@ -40,33 +40,59 @@
         } catch (e) { /* best-effort */ }
     }
 
+    // #113 (ruleta v2): helpers de los premios en % EXTRA.
+    function _pctSpin(spin) { return !!(spin && spin.prizeType === 'percent'); }
+    function _timeLeft(iso) {
+        try {
+            const ms = new Date(iso).getTime() - Date.now();
+            if (!(ms > 0)) return 'vence ya';
+            const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+            return 'vence en ' + (h > 0 ? h + 'h ' : '') + m + 'm';
+        } catch (e) { return ''; }
+    }
+    function _hasPending() {
+        return !!(_state && Number(_state.pendingPct || 0) > 0);
+    }
+
     function renderHomeCard() {
         const c = document.getElementById('rouletteHomeCard');
         if (!c) return;
-        if (!_state || !_state.eligible) {
+        // v2: la card se muestra si la ruleta está ACTIVADA (aunque todavía no
+        // pueda girar: el modal le explica qué le falta). Con el backend viejo
+        // (sin `enabled`) se mantiene el criterio anterior (solo elegibles).
+        const visible = _state && _state.enabled !== false &&
+            (_state.eligible || _state.needsDeposit || _state.needsAppNotifs || _hasPending());
+        if (!visible) {
             c.style.display = 'none';
             c.innerHTML = '';
-            // Ocultar tambien el card separado por si quedo de antes.
             const sep = document.getElementById('rouletteRecentWinnersCard');
             if (sep) sep.style.display = 'none';
             return;
         }
 
         const spin = _state.spin;
-        // Celda compacta con el mismo formato que el recuadro de usuario
-        // (avatar dorado + etiqueta + estado). Tap → modal de spin.
         let subText;
         if (_state.alreadySpun && spin) {
             const won = Number(spin.prizeARS || 0) > 0;
-            if (won && spin.status === 'credited') {
+            if (_pctSpin(spin) && spin.status === 'percent_pending') {
+                subText = '+' + _fmt(spin.prizePct) + '% en tu próx. carga';
+            } else if (_pctSpin(spin) && spin.status === 'percent_used') {
+                subText = '+' + _fmt(spin.prizePct) + '% aplicado ✅';
+            } else if (won && spin.status === 'credited') {
                 subText = 'Ganaste $' + _fmt(spin.prizeARS);
             } else if (won && spin.status === 'credit_failed') {
                 subText = 'Escribinos';
             } else {
                 subText = 'Volvé mañana';
             }
-        } else {
+        } else if (_hasPending()) {
+            subText = '+' + _fmt(_state.pendingPct) + '% en tu próx. carga';
+        } else if (_state.eligible) {
             subText = '¡GIRÁ HOY!';
+        } else if (_state.needsDeposit) {
+            subText = 'Cargá y girá';
+        } else {
+            subText = 'Instalá la app';
         }
 
         c.innerHTML = '<div class="dash-roulette" onclick="VIP.roulette && VIP.roulette.open()">'
@@ -190,12 +216,39 @@
         let html = '<div style="background:linear-gradient(180deg,#1a0033,#0a001a);border:2px solid #ffd700;border-radius:16px;padding:20px 16px;color:#fff;max-width:560px;width:100%;margin:14px auto;position:relative;">';
         html += '<button onclick="VIP.roulette.close()" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.20);color:#fff;font-size:18px;cursor:pointer;line-height:1;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;">✕</button>';
         html += '<h2 style="color:#ffd700;text-align:center;margin:0 0 4px;font-size:22px;font-weight:900;letter-spacing:1.5px;padding-right:36px;">🎰 RULETA DIARIA</h2>';
-        html += '<p style="color:#ddd;text-align:center;margin:0 0 14px;font-size:12px;line-height:1.4;">1 giro por día · auto-acreditación si ganás</p>';
+        html += '<p style="color:#ddd;text-align:center;margin:0 0 14px;font-size:12px;line-height:1.4;">1 giro gratis por día · saldo al instante o % EXTRA en tu próxima carga</p>';
+
+        // #113: % EXTRA pendiente de un giro anterior (todavía vigente) — recordatorio.
+        if (_hasPending() && !(spin && spin.status === 'percent_pending')) {
+            html += '<div style="background:rgba(38,224,127,0.10);border:1px solid #26e07f;border-radius:10px;padding:9px 12px;margin-bottom:10px;text-align:center;color:#fff;font-size:12.5px;">🎁 Tenés <strong style="color:#26e07f;">+' + _fmt(_state.pendingPct) + '% EXTRA</strong> esperando tu próxima carga' + (_state.pendingExpiresAt ? ' · ' + _esc(_timeLeft(_state.pendingExpiresAt)) : '') + '</div>';
+        }
 
         if (alreadySpun) {
             // Estado: ya giró hoy.
             const won = Number(spin.prizeARS || 0) > 0;
-            if (won && spin.status === 'credited') {
+            if (_pctSpin(spin) && spin.status === 'percent_pending') {
+                const exp = _state.pendingExpiresAt || (spin.spunAt ? new Date(new Date(spin.spunAt).getTime() + 24 * 3600 * 1000).toISOString() : null);
+                html += '<div id="rouletteResultBox" style="background:linear-gradient(135deg,rgba(38,224,127,0.12),rgba(255,215,0,0.10));border:2px solid #26e07f;border-radius:14px;padding:24px 16px;text-align:center;margin-bottom:12px;">';
+                html += '<div style="font-size:60px;line-height:1;margin-bottom:8px;">🎁</div>';
+                html += '<div style="color:#26e07f;font-size:13px;font-weight:900;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px;">¡GANASTE!</div>';
+                html += '<div style="color:#fff;font-size:30px;font-weight:900;margin-bottom:6px;">+' + _fmt(spin.prizePct) + '% EXTRA</div>';
+                html += '<div style="color:#ddd;font-size:13px;line-height:1.45;">Se suma <strong>solo</strong> en tu <strong>próxima carga</strong>. No tenés que pedir nada.</div>';
+                html += '<div style="background:rgba(255,215,0,0.12);border:1px solid #ffd700;border-radius:8px;padding:8px 12px;margin-top:10px;color:#ffd700;font-size:12px;font-weight:800;">⏳ Reclamable por 24 horas' + (exp ? ' · ' + _esc(_timeLeft(exp)) : '') + ' — cargá antes de que venza</div>';
+                html += '</div>';
+            } else if (_pctSpin(spin) && spin.status === 'percent_used') {
+                html += '<div id="rouletteResultBox" style="background:rgba(38,224,127,0.08);border:2px solid #26e07f;border-radius:14px;padding:22px 16px;text-align:center;margin-bottom:12px;">';
+                html += '<div style="font-size:54px;line-height:1;margin-bottom:8px;">✅</div>';
+                html += '<div style="color:#26e07f;font-size:13px;font-weight:900;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px;">Premio aplicado</div>';
+                html += '<div style="color:#fff;font-size:24px;font-weight:900;margin-bottom:6px;">+' + _fmt(spin.prizePct) + '% EXTRA</div>';
+                html += '<div style="color:#ddd;font-size:13px;">' + (Number(spin.usedBonusARS || 0) > 0 ? 'Te sumamos <strong>$' + _fmt(spin.usedBonusARS) + '</strong> en tu carga. 🎉' : 'Ya se usó en tu carga. 🎉') + '</div>';
+                html += '</div>';
+            } else if (_pctSpin(spin) && spin.status === 'percent_expired') {
+                html += '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(255,255,255,0.20);border-radius:14px;padding:22px 16px;text-align:center;margin-bottom:12px;">';
+                html += '<div style="font-size:50px;margin-bottom:6px;">⌛</div>';
+                html += '<div style="color:#aaa;font-size:13px;font-weight:900;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px;">Tu +' + _fmt(spin.prizePct) + '% venció</div>';
+                html += '<div style="color:#ddd;font-size:13px;">Pasaron 24 h sin cargar. Mañana podés girar de nuevo 🎰</div>';
+                html += '</div>';
+            } else if (won && spin.status === 'credited') {
                 html += '<div id="rouletteResultBox" style="background:linear-gradient(135deg,rgba(102,255,102,0.10),rgba(255,215,0,0.10));border:2px solid #66ff66;border-radius:14px;padding:24px 16px;text-align:center;margin-bottom:12px;">';
                 html += '<div style="font-size:60px;line-height:1;margin-bottom:8px;">🎉</div>';
                 html += '<div style="color:#66ff66;font-size:13px;font-weight:900;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px;">¡GANASTE!</div>';
@@ -213,7 +266,7 @@
                 html += '<div style="font-size:48px;margin-bottom:6px;">⚠️</div>';
                 html += '<div style="color:#ffaa66;font-size:13px;font-weight:900;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px;">PREMIO PENDIENTE</div>';
                 html += '<div style="color:#fff;font-size:24px;font-weight:900;margin-bottom:6px;">$' + _fmt(spin.prizeARS) + '</div>';
-                html += '<div style="color:#ffd0a0;font-size:12px;margin-top:8px;">Ganaste pero la acreditación automática falló. Escribinos por WhatsApp al número principal y te lo cargamos.</div>';
+                html += '<div style="color:#ffd0a0;font-size:12px;margin-top:8px;">Ganaste pero la acreditación automática falló. Escribinos por el chat y te lo cargamos.</div>';
                 html += '</div>';
             } else {
                 html += '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(255,255,255,0.20);border-radius:14px;padding:24px 16px;text-align:center;margin-bottom:12px;">';
@@ -223,16 +276,42 @@
                 html += '</div>';
             }
             html += '<button onclick="VIP.roulette.close()" style="width:100%;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.20);padding:12px;border-radius:10px;font-weight:800;font-size:13px;cursor:pointer;">CERRAR</button>';
+        } else if (_state.eligible === false && (_state.needsDeposit || _state.needsAppNotifs)) {
+            // #113: todavía no puede girar — le decimos qué le falta.
+            html += '<div id="rouletteResultBox" style="background:rgba(0,0,0,0.30);border:2px dashed rgba(255,215,0,0.55);border-radius:14px;padding:24px 16px;text-align:center;margin-bottom:12px;">';
+            html += '<div style="font-size:54px;line-height:1;margin-bottom:8px;">🔒</div>';
+            if (_state.needsAppNotifs) {
+                html += '<div style="color:#ffd700;font-size:15px;font-weight:900;margin-bottom:6px;">Instalá la app para girar</div>';
+                html += '<div style="color:#ddd;font-size:13px;margin-bottom:12px;">La ruleta diaria es para la app instalada con notificaciones activas.</div>';
+                html += '<button onclick="VIP.roulette._needsApp()" style="background:linear-gradient(135deg,#ffd700,#f7931e);color:#000;border:none;padding:13px 26px;border-radius:12px;font-weight:900;font-size:14px;cursor:pointer;letter-spacing:1px;">📲 VER CÓMO</button>';
+            } else {
+                const n = Number(_state.minDeposits || 1), d = Number(_state.depositDays || 0);
+                html += '<div style="color:#ffd700;font-size:15px;font-weight:900;margin-bottom:6px;">Cargá y girá gratis todos los días</div>';
+                html += '<div style="color:#ddd;font-size:13px;margin-bottom:4px;">Para girar necesitás <strong>' + _fmt(n) + ' carga' + (n > 1 ? 's' : '') + '</strong>' + (d > 0 ? ' en los últimos <strong>' + _fmt(d) + ' días</strong>' : '') + '.</div>';
+                html += '<div style="color:#aaa;font-size:12px;">Hacé tu carga por el chat y volvé: el giro te espera. 🎰</div>';
+            }
+            html += '</div>';
+            html += '<button onclick="VIP.roulette.close()" style="width:100%;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.20);padding:12px;border-radius:10px;font-weight:800;font-size:13px;cursor:pointer;">CERRAR</button>';
         } else {
-            // Estado: aún no giró. Ícono 🎰 con animación + CTA. Sin tabla
-            // de probabilidades (el reparto ahora es por monto diario).
+            // Estado: aún no giró. Ícono 🎰 con animación + CTA.
             html += '<div id="rouletteResultBox" style="background:linear-gradient(135deg,#4a0080,#7c00cc);border:2px solid #ffd700;border-radius:14px;padding:28px 16px;text-align:center;margin-bottom:12px;box-shadow:inset 0 0 30px rgba(255,215,0,0.20);">';
             html += '<div style="font-size:72px;line-height:1;margin-bottom:6px;animation:rouletteIcon 2s ease-in-out infinite;">🎰</div>';
             html += '<div style="color:#ffd700;font-size:16px;font-weight:900;letter-spacing:1px;margin-bottom:4px;">Tu giro de hoy te espera</div>';
-            html += '<div style="color:#fff;font-size:13px;margin-bottom:14px;opacity:0.92;">Tocá <strong>GIRAR</strong> y la suerte decide. Si ganás, se acredita solo a tu saldo.</div>';
+            html += '<div style="color:#fff;font-size:13px;margin-bottom:14px;opacity:0.92;">Tocá <strong>GIRAR</strong> y la suerte decide. Saldo → se acredita solo. % EXTRA → se suma en tu próxima carga (vale 24 h).</div>';
             html += '<button id="rouletteSpinBtn" onclick="VIP.roulette.spin()" style="background:linear-gradient(135deg,#ffd700,#f7931e);color:#000;border:none;padding:16px 40px;border-radius:12px;font-weight:900;font-size:18px;cursor:pointer;letter-spacing:2px;box-shadow:0 4px 16px rgba(255,215,0,0.50);">🎰 GIRAR</button>';
             html += '</div>';
             html += '<style>@keyframes rouletteIcon { 0%, 100% { transform: rotate(-10deg); } 50% { transform: rotate(10deg); } }</style>';
+        }
+
+        // #113: qué se puede ganar (etiquetas de la config del panel).
+        const segs = Array.isArray(_state.segments) ? _state.segments : [];
+        if (segs.length) {
+            html += '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin:10px 0 2px;">';
+            for (const sg of segs) {
+                const col = sg.type === 'cash' ? '#ffd700' : (sg.type === 'percent' ? '#26e07f' : '#888');
+                html += '<span style="border:1px solid ' + col + ';color:' + col + ';border-radius:999px;padding:3px 9px;font-size:11px;font-weight:800;">' + _esc(sg.label) + '</span>';
+            }
+            html += '</div>';
         }
 
         // Bloque de transparencia: ganadores del día (live), DENTRO del modal.
@@ -298,6 +377,10 @@
                     // No tiene app instalada y/o notifs aceptadas — mostrar
                     // el modal con los pasos clarito para que pueda participar.
                     _showNeedsAppModal();
+                } else if (d && d.needsDeposit) {
+                    _state.eligible = false; _state.needsDeposit = true;
+                    _state.minDeposits = d.minDeposits; _state.depositDays = d.depositDays;
+                    _renderModal();
                 } else {
                     if (box) box.innerHTML = '<div style="color:#ff8080;padding:20px;">❌ ' + _esc((d && d.error) || 'Error') + '</div>';
                 }
@@ -309,10 +392,17 @@
             _state.spin = {
                 prizeARS: d.prize.prizeARS,
                 prizeLabel: d.prize.prizeLabel,
+                prizeType: d.prize.type || (Number(d.prize.prizeARS) > 0 ? 'cash' : 'none'),
+                prizePct: d.prize.prizePct || 0,
                 status: d.prize.status,
                 spunAt: new Date().toISOString(),
                 creditTxId: d.prize.transactionId || null
             };
+            if (d.prize.type === 'percent') {
+                _state.pendingPct = d.prize.prizePct || 0;
+                _state.pendingLabel = d.prize.prizeLabel || null;
+                _state.pendingExpiresAt = d.prize.expiresAt || null;
+            }
             _renderModal();
             renderHomeCard();
             // Refrescar saldo del header (mismo patrón que installbonus/withdraw).
@@ -382,7 +472,7 @@
         } catch (e) { /* best-effort */ }
     }
 
-    VIP.roulette = { loadStatus, open, close, spin, loadRecentWinners };
+    VIP.roulette = { loadStatus, open, close, spin, loadRecentWinners, _needsApp: _showNeedsAppModal };
 
     // Boot: cargar status apenas el usuario esté autenticado.
     document.addEventListener('DOMContentLoaded', () => {

@@ -8,6 +8,53 @@
 
 ## Sesión 2026-10-19
 
+### 113. 🎰 Ruleta diaria v2: premios configurables (% EXTRA / saldo / sin premio), gates editables y Transacciones del premio — réplica #254/#293/#303/#305/#306 de PAUTANUEVAsantino
+- **Owner:** "en PAUTA cuando reclaman un regalo de la ruleta diaria aparece el detalle en Transacciones;
+  acá no aparece ni el saldo ni el bono. Que quede como en PAUTA: que aparezca quién reclama bono en plata,
+  los que tienen bono en porcentaje y quién reclama ese bono; que se pueda poner cargas mínimas y en
+  cuántos días, y exigir o no app instalada."
+- **Diagnóstico:** la ruleta de VIP era la v1: tabla fija de premios en $, gate hardcodeado (app instalada
+  + >10 cargas/30d), y el crédito del premio NO dejaba `Transaction` (el regalo era invisible en el panel).
+- **Modelos:** `DailyRouletteSpin` reemplazado por el de PAUTA (`prizeType` cash|percent|none, `prizePct`,
+  estados `percent_pending|percent_used|percent_expired`, `usedAt/usedBy/usedOnAmount/usedBonusARS`).
+  `User` suma `dailyRoulettePendingPct`, `dailyRoulettePendingLabel`, `dailyRouletteWonAt`.
+- **Config (`Config['dailyRoulette']`, `GET/POST /api/admin/daily-roulette`, POST solo admin general):**
+  `enabled` (default **OFF** — hay que prenderla desde el panel), `requireDeposits` (cargas mínimas
+  reales, sin regalos), `depositDays` (ventana; 0 = histórico), `requireAppInstalled` (default off) y
+  `prizes[]` {label, type, value, weight} (máx. 12). Se guarda con `setConfig` (clave camelCase).
+  Default sembrado: 10% (40) / 20% (14) / $500 (10) / $1.000 (5) / 50% (1) / sin premio (30).
+- **Giro (`POST /api/roulette/spin`):** gates desde la config (`needsAppNotifs` / `needsDeposit` con
+  `minDeposits`+`depositDays` en el 403). Premio **cash** → `jugaygana.creditUserBalance` (camino
+  histórico) + **`Transaction` tipo bonus** "Ruleta diaria — premio en saldo (label)" con
+  `metadata.source:'daily_roulette'` + `spinId` + nota interna. Premio **percent** → queda PENDIENTE en el
+  User (vence 24 h; cron `_expireDailyRoulettePct` cada 15 min + chequeo lazy) + nota interna. Budget
+  pacing sigue igual (solo afecta premios cash; degrada a "sin premio" o al primer %). Sin cooldown de 24 h:
+  se mantiene 1 giro por día calendario ART.
+- **Canje del % en las cargas (`_applyDailyRoulettePctOnDeposit`):** reserva atómica
+  (`claimDailyRoulettePercent`) → tope con la MISMA regla del lote (`_loteBonusAmount` con la config global
+  de hgcash) → `creditUserBalanceVerified` → `Transaction` bonus "Ruleta diaria — {label} aplicado en carga
+  de $X" (`metadata.appliedOnDeposit:true, depositTxId, pct`) + giro `percent_used` (quién/cuándo/sobre
+  qué carga/cuánto) + nota interna. Fallo limpio → se devuelve el % pendiente; ambiguo → queda usado
+  "(VERIFICAR)" + `_alertMoneyAmbiguous`. Enganches: carga manual **sin bonus del agente** (antes del
+  lote, con la misma carrera `LOTE_MANUAL_WAIT_MS` y cierre en segundo plano) y `hgcashAutoCarga` (después
+  del bono app, antes del lote; `appBonus.kind='roulette'`). Una carga = como mucho UN bono automático.
+  Si el agente carga bonus **a mano**, el % pendiente queda consumido (`usedBy:'bonus manual de X'`,
+  bono 0) para no regalar dos veces. El bono de ruleta NO consume PromoBonus ni fueguito y NO crea la
+  Transaction genérica "Bonificación incluida en depósito" (ya tiene la suya).
+- **Panel (sección 🎰 Ruleta diaria):** card "PREMIOS DE LA RULETA DIARIA" (activada, cargas mínimas, días,
+  exigir app, lista de premios con tipo/valor/peso y probabilidades) + caja "REINICIAR RULETA PARA UN
+  USUARIO" (`POST /api/admin/roulette/reset-user`: borra su giro de hoy y su % pendiente). Stats: cards
+  "% EXTRA aplicados / ganados · vencidos" y "$ Bono por % EXTRA"; por día columnas "% aplic./ganados" y
+  "$ Bono %"; "por premio" ahora agrupa por etiqueta (los % ya no se mezclan con "sin premio"); historial
+  con badges 🎁 % PENDIENTE / ✅ % APLICADO (quién, cuándo, sobre qué carga, cuánto) / ⌛ % VENCIDO. El
+  giro de prueba muestra también los premios en %. Reintento de crédito deja la Transaction si faltaba.
+- **PWA (`roulette.js`):** la card 🎰 se muestra si la ruleta está activada (aunque todavía no pueda
+  girar: el modal explica "necesitás N cargas en los últimos D días" o "instalá la app"). Resultado % con
+  cuenta regresiva de 24 h, estados aplicado/vencido, chips con los premios posibles. `?v=59` / SW v59;
+  admin-sw v37.
+- **Pendiente operativo:** entrar al panel → 🎰 Ruleta diaria → tildar "Ruleta diaria ACTIVADA" y guardar
+  (sin eso la ruleta queda invisible para los clientes).
+
 ### 112. 🔗 Link de acceso de UN SOLO USO (entra sin contraseña) — réplica #111 de PAUTANUEVAsantino
 - **Owner (capturas del panel de AUTOREEMBOLSOS):** "agarrá de PAUTANUEVAsantino el link de inicio de
   sesión automático y replicalo acá: que se genere solo al crear un usuario nuevo y aparezca para copiar

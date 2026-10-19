@@ -94,6 +94,9 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
 - **Referidos** (#105): la comisión es % sobre el NETWIN y la tasa sale SIEMPRE de
   `referralTierService.resolveReferralRate(user)` (override > niveles por referidos
   activos > % plano editable). Nada de premios en plata por cantidad de referidos.
+- **Ruleta diaria v2** (#113): premios/gates en `Config['dailyRoulette']` (`enabled` default
+  OFF). El premio en % se canjea en la carga con `_applyDailyRoulettePctOnDeposit` (antes del
+  lote; una carga = UN bono automático). Todo premio deja `Transaction` `source:'daily_roulette'`.
 - **Lotes con regalo** (#103, `NotifBatch` + PromoBonus `sourceRuleCode:'lote'`): el %
   automático se engancha en `/api/admin/deposit` (solo si el agente NO puso bonus) y en
   `hgcashAutoCarga`; una carga = como mucho UN bono automático. Los bonos de lote están
