@@ -207,12 +207,12 @@
     <noscript><img height="1" width="1" style="display:none"
         src="https://www.facebook.com/tr?id=__META_PIXEL_ID_PLACEHOLDER__&ev=PageView&noscript=1"/></noscript>
 
-    <link rel="stylesheet" href="/css/base.css?v=62">
-    <link rel="stylesheet" href="/css/login.css?v=62">
-    <link rel="stylesheet" href="/css/header.css?v=62">
-    <link rel="stylesheet" href="/css/chat.css?v=62">
-    <link rel="stylesheet" href="/css/modals.css?v=62">
-    <link rel="stylesheet" href="/css/responsive.css?v=62">
+    <link rel="stylesheet" href="/css/base.css?v=63">
+    <link rel="stylesheet" href="/css/login.css?v=63">
+    <link rel="stylesheet" href="/css/header.css?v=63">
+    <link rel="stylesheet" href="/css/chat.css?v=63">
+    <link rel="stylesheet" href="/css/modals.css?v=63">
+    <link rel="stylesheet" href="/css/responsive.css?v=63">
     <style>
         /* In-app notification banner (foreground PWA) */
         .in-app-notification-banner {
@@ -316,6 +316,8 @@
                     <div style="color:#d4af37;font-size:10px;font-weight:900;letter-spacing:5px;margin:3px 0 1px;">V I P</div>
                     <h1 style="letter-spacing:3px;margin:0;">VIPCARGAS</h1>
                     <div style="width:56px;height:2px;background:linear-gradient(90deg,transparent,#d4af37,transparent);margin:6px auto;"></div>
+                    <!-- #117: HISTORIAS públicas en el ingreso (anillo tipo Instagram; aparece sólo si hay historias y la función está prendida) -->
+                    <button type="button" id="lgStoriesRing" class="lg-ring" style="display:none;margin:2px auto 0;" onclick="if(window.VIP&&VIP.stories)VIP.stories.open()" title="Historias" aria-label="Ver historias"><span class="lg-ring-av"><img src="/icons/icon-192x192.png" alt=""></span><b id="lgStoriesCount" class="lg-ring-n"></b></button>
                 </div>
                 <button id="loginGiftsBtn" type="button" style="flex:0 0 64px;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 4px;background:rgba(106,13,173,0.18);border:1px solid rgba(157,78,221,0.55);border-radius:11px;color:#d9b8ff;cursor:pointer;-webkit-tap-highlight-color:rgba(157,78,221,.3);touch-action:manipulation;">
                     <span style="font-size:19px;line-height:1;">🎁</span>
@@ -428,6 +430,12 @@
             <button class="tb-info" id="infoBtn" title="Información de nuestro servicio">
                 <span class="tb-info-icon">ℹ️</span>
                 <span class="tb-info-text">Información de nuestro servicio</span>
+            </button>
+            <!-- #117 HISTORIAS (réplica de PICA ROJA): anillo tipo historia; con historias nuevas brilla y muestra la cantidad.
+                 stories.js lo pinta y abre el visor #storyViewer. Oculto hasta que la función esté prendida en COMANDOS. -->
+            <button type="button" class="tb-stories" id="navHistorias" style="display:none;" onclick="if(window.VIP&&VIP.stories)VIP.stories.open()" title="Historias">
+                <span class="st-ring"><span class="st-core">▶</span><span class="st-badge" id="storiesBadge" style="display:none;">1</span></span>
+                <span class="tb-stories-text" id="storiesLbl">Historias</span>
             </button>
             <div class="tb-right">
                 <button class="tb-btn settings-btn" id="settingsBtn" title="Configuración">⚙️</button>
@@ -1918,24 +1926,24 @@
          /css/, así que sin la query un deploy corre UNA carga con HTML nuevo + JS
          viejo cacheado (TypeError si el HTML cambió el DOM). Al cambiar HTML y JS
          JUNTOS, bumpear ?v acá y CACHE_VERSION del SW al mismo número. -->
-    <script src="/js/config.js?v=62"></script>
-    <script src="/js/campaign.js?v=62"></script>
-    <script src="/js/meta-pixel.js?v=62"></script>
-    <script src="/js/auth.js?v=62"></script>
-    <script src="/js/socket.js?v=62"></script>
-    <script src="/js/chat.js?v=62"></script>
-    <script src="/js/refunds.js?v=62"></script>
-    <script src="/js/fire.js?v=62"></script>
-    <script src="/js/roulette.js?v=62"></script>
-    <script src="/js/reviews.js?v=62"></script>
-    <script src="/js/promobonus.js?v=62"></script>
-    <script src="/js/notifications.js?v=62"></script>
-    <script src="/js/ui.js?v=62"></script>
-    <script src="/js/withdraw.js?v=62"></script>
-    <script src="/js/installbonus.js?v=62"></script>
-    <script src="/js/notifsurvey.js?v=62"></script>
-    <script src="/js/publisherwelcome.js?v=62"></script>
-    <script src="/js/apptest.js?v=62"></script>
+    <script src="/js/config.js?v=63"></script>
+    <script src="/js/campaign.js?v=63"></script>
+    <script src="/js/meta-pixel.js?v=63"></script>
+    <script src="/js/auth.js?v=63"></script>
+    <script src="/js/socket.js?v=63"></script>
+    <script src="/js/chat.js?v=63"></script>
+    <script src="/js/refunds.js?v=63"></script>
+    <script src="/js/fire.js?v=63"></script>
+    <script src="/js/roulette.js?v=63"></script>
+    <script src="/js/reviews.js?v=63"></script>
+    <script src="/js/promobonus.js?v=63"></script>
+    <script src="/js/notifications.js?v=63"></script>
+    <script src="/js/ui.js?v=63"></script>
+    <script src="/js/withdraw.js?v=63"></script>
+    <script src="/js/installbonus.js?v=63"></script>
+    <script src="/js/notifsurvey.js?v=63"></script>
+    <script src="/js/publisherwelcome.js?v=63"></script>
+    <script src="/js/apptest.js?v=63"></script>
     <!-- #116: qué teléfono usa (modelo/OS/pantalla) para Datos IA y las Alertas de estafa; lo manda activity.js en cada ping -->
     <script>(function () { try {
       var ua = navigator.userAgent || '';
@@ -1950,8 +1958,25 @@
       window.VIP_DEVICE = { os: ios ? 'ios' : (and ? 'android' : 'otro'), model: model, w: w, h: h, dpr: window.devicePixelRatio || 1, app: app };
       if (and && navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) navigator.userAgentData.getHighEntropyValues(['model']).then(function (v) { if (v && v.model) window.VIP_DEVICE.model = v.model; }).catch(function () {});
     } catch (e) {} })();</script>
-    <script src="/js/activity.js?v=62"></script>
-    <script src="/js/app.js?v=62"></script>
+    <!-- #117: visor de HISTORIAS (pantalla completa). Tocar derecha = siguiente, izquierda = anterior, mantener = pausa. -->
+    <div id="storyViewer" class="story-viewer" aria-hidden="true">
+        <div class="st-bars" id="storyBars"></div>
+        <div class="st-head">
+            <span class="st-logo"><img src="/icons/icon-96x96.png" alt=""></span>
+            <span class="st-who"><b class="st-brand">VIPCARGAS</b><small class="st-brand-sub">oficial</small><b id="storyTitle" class="st-title-hidden">VIPCARGAS</b><small id="storyWhen"></small></span>
+            <button type="button" class="st-close" onclick="VIP.stories.close()" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="st-media" id="storyMedia"></div>
+        <div class="st-tap" id="storyTap"></div>
+        <div class="st-foot">
+            <div class="st-caption" id="storyCaption"></div>
+            <a class="st-link" id="storyLink" href="#" target="_blank" rel="noopener" style="display:none;">Ver más ›</a>
+            <div class="st-react" id="storyReact" style="display:none;"></div>
+        </div>
+    </div>
+    <script src="/js/activity.js?v=63"></script>
+    <script src="/js/stories.js?v=63"></script>
+    <script src="/js/app.js?v=63"></script>
     
     <!-- ============================================
          FIREBASE CLOUD MESSAGING & PWA

@@ -1948,3 +1948,7 @@ body {
 #fraudSection .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 12px 14px; color: #e2e8f0; }
 #frCaseModal.hidden { display: none !important; }
 #frCaseModal .modal-content { background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 14px; padding: 16px; width: min(900px, 96vw); }
+
+/* #117 Cronograma historias: tarjetas del plan del día */
+.sa-item { font-size:.76rem; padding:5px 7px; border-radius:8px; background:rgba(255,255,255,.03); display:flex; flex-direction:column; gap:2px; }
+.sa-item .sa-sub { color:#9ca3af; font-size:.72rem; }

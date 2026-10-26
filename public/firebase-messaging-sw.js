@@ -34,7 +34,7 @@ try {
 // ============================================
 // CONFIGURACIÓN DE CACHÉ
 // ============================================
-const CACHE_VERSION = 'v62'; // v62: medidor de uso de la app (activity.js) para Datos IA (#116) // v61: interruptores de funciones + registro sólo con invitación (#115) // v60: cambio de clave — teléfono opcional + cerrar sesiones sin desloguearse (#114) // v59: ruleta diaria v2 (premios % EXTRA, gates por cargas) (#113) // v58: link de acceso de un solo uso ?acceso= (#112) // v57: soporte del login sin link fijo + 💬 dinámico, rangos con 3 % (#108) // v56: card de referidos compacta (v55: referidos nuevos; v54: botón Reclamar de regalos de fichas; v53: botón 🎁 + modal Regalos con código; v52: vuelve el reembolso diario; v51: rangos + cupón install 100%; v50: stale-while-revalidate js/css)
+const CACHE_VERSION = 'v63'; // v63: HISTORIAS (botón en el header, anillo en el ingreso, visor, bono +X% reclamable, push que abre la historia) — sólo con la función prendida (#117) // v62: medidor de uso de la app (activity.js) para Datos IA (#116) // v61: interruptores de funciones + registro sólo con invitación (#115) // v60: cambio de clave — teléfono opcional + cerrar sesiones sin desloguearse (#114) // v59: ruleta diaria v2 (premios % EXTRA, gates por cargas) (#113) // v58: link de acceso de un solo uso ?acceso= (#112) // v57: soporte del login sin link fijo + 💬 dinámico, rangos con 3 % (#108) // v56: card de referidos compacta (v55: referidos nuevos; v54: botón Reclamar de regalos de fichas; v53: botón 🎁 + modal Regalos con código; v52: vuelve el reembolso diario; v51: rangos + cupón install 100%; v50: stale-while-revalidate js/css)
 const CACHE_NAME = 'sala-juegos-fcm-' + CACHE_VERSION;
 
 // Logs por-fetch del SW (corren en CADA request). Apagados por default;
@@ -161,16 +161,20 @@ self.addEventListener('notificationclick', function(event) {
 
   if (event.action === 'close') return;
 
+  // #117: si la notificación trae una URL (ej. /?story=<id> o /?open=refund), la app abierta la recibe por mensaje
+  // ({type:'vip-open', url}) y abre esa parte; si no hay ventana, se abre esa URL. Sin URL sigue como siempre (/).
+  const _url = (event.notification && event.notification.data && event.notification.data.url) || '/';
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true })
       .then(function(clientList) {
         for (const client of clientList) {
           if (client.url.includes(self.location.origin) && 'focus' in client) {
+            try { client.postMessage({ type: 'vip-open', url: _url }); } catch (e) {}
             return client.focus();
           }
         }
         if (clients.openWindow) {
-          return clients.openWindow('/');
+          return clients.openWindow(_url);
         }
       })
   );

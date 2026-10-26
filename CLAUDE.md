@@ -124,6 +124,10 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   `/sys_register_invite`). `GET /api/config/access` es público y lo pide la PWA al arrancar.
   Tanda 2 (#116): `fraudRadar.js` (sin stats de juego: JUGAYGANA no tiene consulta por lote) y `datosIaService.js`
   (rutas `/api/admin/datos-ia/*` con clave propia `x-datos-pin`; configs con `getConfig`/`setConfig`).
+  Tanda 3 (#117): **Historias** (`Story` + `storyAutopilot`/`storyImage`, sin slot de la semana ni VIP/deportes): el bono
+  "+X%" de una historia se aplica en la carga con `_applyStoryBonusOnDeposit` (mismo contrato que el % de la ruleta:
+  manual sin bonus del agente + hgcash, antes del lote; source `story_bonus`). En el panel `deleteStory`/`submitNewStory`
+  son de las historias de INFLUENCERS: las de la app se llaman `*AppStory`. El SW reenvía `data.url` de la push (`vip-open`).
 
 - **Lotes y Cronograma (#110):** el POST `/api/admin/notif-batches` es un wrapper de
   `_createNotifBatchFromBody(body, user)`; cualquier validación/efecto nuevo del lote va en esa

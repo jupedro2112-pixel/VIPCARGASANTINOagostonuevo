@@ -660,3 +660,22 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `otherPageStats`, `projectionCalibration`. `_diaPromoConfig` lee `getHgcashAppBonusConfig()`, `getRefundTiers()` y
   `getDailyRouletteConfig()`. `POST /api/activity/ping` (rol user) arma las sesiones y escribe `lastDevice`/`deviceIds`;
   apagado ⇒ `{ok:false, off:true}`. Cliente: `public/js/activity.js` + `window.VIP_DEVICE` (index.html).
+
+### 10.2 Historias (#117)
+
+- Modelo `Story` (`src/models/Story.js`; `autoKey` único sparse, `mediaData` y `autoImg` con `select:false`; vencen por
+  `expiresAt` pero quedan en el panel). `User.storyBonus`.
+- Rutas cliente: `GET /api/stories/public` (sin sesión), `GET /api/stories/active` (`off:true` si está apagado),
+  `POST /api/stories/:id/view|click|react`, `GET /api/stories/:id/auto.svg|media`, `POST /api/stories/:id/claim-bonus`,
+  `GET /api/stories/bonus`. Admin: `/api/admin/stories*`, `/api/admin/stories-autopilot*` (admin general). Gate `_storiesGate`.
+- Motor: `_storyAutoTick` (5 min), `_storiesRepeatTick` (1 h); plan del día = `storyAuto.planDay(dayKey, matches, ctx)` con
+  `ctx.favorite = null` (JUGAYGANA sin catálogo público), `rolloverX = null`, `firstPct = 0`; fotos = `storyImage.renderSvg`
+  servidas en `/auto.svg` (CSP estricta). `STORY_IMG_VER` fuerza rearmar las fotos. Config: `storiesConfig`,
+  `storyAutoMatches`, `storyAutoDiag`.
+- **Bono de historia en la carga:** `_applyStoryBonusOnDeposit(ctx)` (mismo contrato que `_applyDailyRoulettePctOnDeposit`:
+  reserva atómica → tope del lote → crédito verificado → `_recordAppliedBonusTx` kind `story_bonus` → nota). Hooks: carga
+  manual sin bonus del agente (después de la ruleta, antes del lote; `_storyClaim/_storyBusy`) y `hgcashAutoCarga`
+  (`appBonus.kind='story'`). Bonus a mano ⇒ `_consumeStoryBonusManual`. Un flujo de carga nuevo tiene que llamar al hook.
+- PWA: `public/js/stories.js` (`VIP.stories = {init, load, loadPublic, open, openById, claimBonus, close, …}`), botón
+  `#navHistorias` (header), anillo `#lgStoriesRing` (ingreso), visor `#storyViewer`; CSS en `chat.css` y `login.css`.
+  Links `app:*` mapeados a esta app (casino = `VIP.ui.openPlatformModal`). El SW reenvía `data.url` de la push (`vip-open`).

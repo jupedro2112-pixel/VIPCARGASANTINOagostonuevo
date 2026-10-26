@@ -33,6 +33,8 @@ VIP.auth = (function () {
                 if (!j) return;
                 _accessConfig = j;
                 _applyRegistrationMode(j);
+                // #117: historias públicas en la pantalla de ingreso (sólo con la función prendida)
+                try { if (j.features && j.features.stories && VIP.stories && VIP.stories.loadPublic) VIP.stories.loadPublic('lgStoriesRing'); } catch (_) {}
                 try { document.dispatchEvent(new CustomEvent('vip:access-config', { detail: j })); } catch (_) {}
             }).catch(function () {});
     } catch (_) {}

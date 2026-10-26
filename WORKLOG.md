@@ -8,6 +8,62 @@
 
 ## Sesión 2026-10-26
 
+### 117. RÉPLICA DE PICA ROJA — tanda 3: 📽️ HISTORIAS manuales + 📖 automáticas (en OFF, interruptor en COMANDOS)
+- **Qué es:** historias estilo Instagram en la app: botón **"Historias"** en el header (antes del grupo de la derecha,
+  oculto hasta que la función esté prendida), **anillo** en la pantalla de ingreso debajo del logo (historias públicas)
+  y **visor** a pantalla completa (`#storyViewer`: barras, tocar derecha/izquierda, mantener = pausa, reacciones
+  🔥❤️😂👍 una por cliente, toques al botón). Archivos nuevos: `src/models/Story.js`, `src/services/storyAutopilot.js`,
+  `src/services/storyImage.js` (SVG 1080×1920 server-side, sin sharp/canvas), `public/js/stories.js`,
+  `public/images/games/*.jpg` (10 fotos de slots). Copiados de CARGASGIROX #210 y **rebrandeados a VIPCARGAS**
+  (logo = `icons/icon-192x192.png`, "JUGAYGANA" donde allá decía 1Girox).
+- **Manuales** (panel → Nuevo → "📽️ Historias", `#storiesSection`, solo admin general): imagen/video/texto, botón
+  (https, / o `app:cargar|retirar|ruleta|reembolso|referidos|verificar|soporte|instalar|juegos|casino`), horas visibles,
+  repetir semanal, compositor "🎨 armar la foto" (canvas, `stMakeArt`) y **"⚡ Historia de bono en 1 toque"** (sólo % y
+  horas; la imagen la arma el server; push a todos). Funciones `loadAppStories/publishAppStory/extendAppStory/
+  toggleAppStory/deleteAppStory/saveAppStoriesConfig` (prefijo App porque `deleteStory`/`submitNewStory` ya son de las
+  historias de INFLUENCERS de este panel). Rutas `GET/POST /api/admin/stories`, `POST …/config`, `PATCH/DELETE …/:id`.
+- **Automáticas** (panel → Notificaciones → "📖 Cronograma historias", `#cronohistSection`): `_storyAutoTick` cada 5 min
+  (arranca 2 min después del boot): 5 historias de SERVICIO por día a las 00:05–00:09 que rotan sin repetir las de ayer
+  (temas: cómo funciona, carga, retiros, reembolso, soporte, referidos, juegos, instalar la app, seguridad), miércoles
+  19:00 el **bono semanal +100 % por 3 h con push a todos**, partidos del día (ESPN público) sólo con la llave
+  `Config['storyAutoMatches']` (default apagada). Las de ayer se apagan al salir las de hoy. `Story.autoKey` único ⇒
+  multi-instancia. Diagnóstico en `Config['storyAutoDiag']`. Rutas `GET /api/admin/stories-autopilot`,
+  `POST …/remove|republish-today|matches`. Repetición semanal de las manuales: `_storiesRepeatTick` (1 h).
+- **Adaptaciones JUGAYGANA (decisiones):** (1) **sin "slot de la semana"**: JUGAYGANA no tiene catálogo público de
+  juegos → `favoriteSlot()` se quitó del servicio y `_storyAutoCtx` pasa `favorite:null`; (2) **sin temas "niveles VIP"
+  ni "Deportes"** (esta PWA no los tiene) → se podaron de `THEMES`/`ALTS`, `STORY_APP_LINK_RE` y la ayuda del panel; los
+  partidos (si se prende la llave) enlazan `app:casino`; (3) **sin rollover**: JUGAYGANA no usa multiplicador en el
+  crédito → fuera las notas "se juega ×{rx}" y `rolloverX:null`; (4) **sin bono fijo de 1ª carga** (`firstPct:0` ⇒ el
+  tema "primera" no sale; el bono hgcash de 1ª carga depende de app+notifs y no se promete en una historia);
+  (5) links `app:*` del visor mapeados a lo que ESTA app tiene: casino → `VIP.ui.openPlatformModal()` ("PÁGINA CASINO
+  AQUÍ"), instalar → `VIP.appTest.doInstall()` / `VIP.ui.showInstallInstructions()`, cargar → `depositModal`, retirar →
+  `VIP.withdraw.openWithdrawModal()`, reembolso → `VIP.refunds.showRefundModal('daily')`, referidos →
+  `VIP.ui.openReferralModal()`, verificar → `verifyPhoneModal`, ruleta → `VIP.roulette.open()`, soporte → foco en el chat;
+  (6) configs con `setConfig`/`getConfig` (`storiesConfig`, `storyAutoMatches`, `storyAutoDiag`).
+- **Bono de la historia en la carga (lo central):** `POST /api/stories/:id/claim-bonus` deja `User.storyBonus {storyId,
+  pct,label,claimedAt,expiresAt}` (bloqueados o con `fraudFlags` no pueden). Allá se integraba a
+  `_pendingBonusFor/_settlePendingBonuses`, que acá no existen: se replicó **el pipeline del % de la ruleta de este repo**
+  (#113). `_applyStoryBonusOnDeposit(ctx)` = mismo contrato que `_applyDailyRoulettePctOnDeposit`: reserva atómica
+  (`_claimStoryBonus`: `storyBonus.pct → 0` sólo si no venció) → tope con la regla del lote (`_loteBonusAmount` +
+  `_loteCfgFor(null, getHgcashAppBonusConfig())`) → `jugaygana.creditUserBalanceVerified` → `_recordAppliedBonusTx`
+  kind **`story_bonus`** (Transaction `bonus`, `metadata.source:'story_bonus'`, `appliedOnDeposit:true`) + contadores de
+  la Story (`bonusUses/bonusUsedTotal/bonusDepositTotal`) + nota interna. Fallo limpio → `_revertStoryBonus` (sigue
+  pendiente hasta vencer); ambiguo → consumido + `_alertMoneyAmbiguous`. **Enganches:** carga manual sin bonus del agente
+  (después de la ruleta y antes del lote, con la misma carrera `LOTE_MANUAL_WAIT_MS` y cierre en segundo plano:
+  `_storyClaim/_storyBusy`) y `hgcashAutoCarga` (después del bono app y la ruleta, antes del lote; `appBonus.kind='story'`,
+  mensaje al cliente "📽️ Incluye tu regalo de la historia" y nota del agente). Una carga = como mucho UN bono automático.
+  Si el agente carga bonus **a mano** (y no fue ruleta/lote/historia automático), el bono de historia pendiente queda
+  consumido (`_consumeStoryBonusManual`). Si lo aplicó la ruleta o el lote, la historia queda para la próxima carga.
+- **Push que abre la historia:** `sendNotificationToAllUsers(User, t, b, { url:'/?story=<id>', … })` → el SW
+  (`notificationclick`) ahora lee `data.url`: con la app abierta manda `{type:'vip-open', url}` (stories.js la abre), si
+  no abre esa URL. Sin URL sigue abriendo `/`. (Lo reutiliza el Centro de avisos con `/?open=refund` en la tanda 4.)
+- **Interruptor** `featureFlags.stories`: `_storiesGate` (404 `FEATURE_OFF`) en todas las rutas; `/api/stories/active`
+  responde `{items:[], off:true}` ⇒ la app esconde el botón; `/api/config/access` publica `features.stories` para el
+  anillo del ingreso (`auth.js` → `VIP.stories.loadPublic`); los crons salen sin hacer nada. Menú del panel con
+  `data-feature="stories"`. `User.storyBonus` nuevo. `?v=63` / SW `v63`; admin-sw `v40`. `node --check` + `check-tdz` OK.
+- **No se trajo:** slot de la semana (sin catálogo), temas VIP/Deportes, `app:play:<ruta>`, bono de bienvenida por días
+  (#886 de PICA ROJA), las migraciones #845/#911/#931 y todo lo de Render.
+
 ### 116. RÉPLICA DE PICA ROJA — tanda 2: 🚨 ALERTAS DE ESTAFA y 🧠 DATOS IA 🔒 (ambas en OFF, interruptor en COMANDOS)
 - **Alertas de estafa** (`src/services/fraudRadar.js`, copiado 1:1 de CARGASGIROX #209 / PICA ROJA #873/#877/#952): reglas
   que cruzan los datos (CBU de carga/retiro compartido, mismo celular por token de push o ID del celular, mismo número de
