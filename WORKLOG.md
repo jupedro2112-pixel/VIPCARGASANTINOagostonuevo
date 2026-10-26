@@ -4,7 +4,53 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-19**
+> **Última actualización: 2026-10-26**
+
+## Sesión 2026-10-26
+
+### 115. RÉPLICA DE PICA ROJA (PICAROJA30) — tanda 1: interruptores en COMANDOS, registro abierto / sólo con invitación, sistema de notificaciones anterior APAGADO y al fondo del menú
+- **Owner:** replicar de `PICAROJA30` seis cosas (Datos IA, Centro de avisos, Alertas de estafa, notificaciones
+  programadas nuevas, registro activado/desactivado, historias) en los 7 repos, **todo en OFF** salvo el registro
+  (ON = abierto) y **todo prendible/apagable desde COMANDOS**. Se trabaja sobre la réplica ya hecha en el gemelo
+  `CARGASGIROX` (#208–#211, plataforma 1girox) adaptando lo que acá es distinto (**esta página corre sobre
+  JUGAYGANA**, marca "VIPCARGAS"). Se hace en 4 tandas; esta es la primera.
+- **Hallazgo clave (igual que en el gemelo):** ni "Datos IA" ni las "notificaciones con IA" usan inteligencia
+  artificial: son reglas sobre los datos de la base. No hay claves, SSM ni dependencias npm nuevas.
+- **Interruptores** — `src/services/featureFlags.js` (nuevo, copiado 1:1 del gemelo): `Config['features']` =
+  `{ datosIa, fraudRadar, notifCenter, autopilot, stories, legacyNotifs }`, **todos `false` por default**, cache 30 s
+  por proceso. Rutas `GET/POST /api/admin/features` (POST solo admin general; `onFeaturesChanged(fn)` para hooks, p. ej.
+  borrar las campañas futuras del piloto automático al apagarlo). Panel → COMANDOS → card **"🧩 Funciones (réplica de
+  PICA ROJA)"** con un tilde por función (`loadFeaturesCard` / `saveFeatures`). Un ítem del menú con
+  `data-feature="x"` se ve sólo si `x` está ON (`applyFeatureNav`, se llama al entrar y al guardar).
+- **Sistema de notificaciones ANTERIOR apagado** (`legacyNotifs`, default OFF): `_runNotifRulesEvaluator` (reglas),
+  `_runEncuestaTick` (encuesta) y `_runDueSchedules` (estrategia programada `ScheduledNotif`, en
+  `notificationRoutes.js`) retornan sin hacer nada mientras el flag esté apagado. Inactividad (`INACTIVIDAD_DISABLED`)
+  y estrategia de bonos (`BONUS_STRATEGY_DISABLED`) ya estaban apagadas por constante y siguen igual. **Lo manual sigue
+  funcionando** (compositor, lotes con regalo, campañas del cronograma creadas a mano): no depende del flag. Menú:
+  "Notificaciones (manual)", "Encuesta" e "Inactivos" bajaron al grupo "No se usa (sistema anterior · apagado en
+  COMANDOS)"; **Cronograma queda arriba** porque va a alojar el piloto automático nuevo (tanda 4).
+- **Registro de clientes** — `Config['registrationMode']` = `'open'` (default, como hasta ahora) | `'invite'`.
+  `_inviteOnlyBlocks(referralCode, campaignCode)`: con `invite`, `POST /api/auth/register` **y**
+  `POST /api/auth/send-register-otp` (ruta legacy del alta con SMS; la PWA de acá registra directo sin OTP, pero se
+  gatea igual para no gastar SMS si alguien la llama) responden `403 {code:'INVITE_ONLY', error:<aviso>}` salvo que
+  venga un código de referido de un cliente real (`User.referralCode`) o una campaña activa (`Campaign.isActive`).
+  La landing de publicistas no cambia (ya exige campaña). Iniciar sesión siempre abierto. Aviso editable:
+  `/sys_register_invite` (sembrado en `initializeData`). Panel → COMANDOS → card **"👤 Registro de clientes"**
+  (`loadRegistrationMode` / `saveRegistrationMode`, `GET/POST /api/admin/registration-mode`; se guarda con
+  `setConfig`/`getConfig` de `config/database.js`, igual que el resto de las configs de este repo).
+- **`GET /api/config/access` (NUEVO acá, público, `Cache-Control: no-store`):** este repo no lo tenía (en el gemelo
+  venía del #197 con el prefijo de usuarios). Devuelve `{registrationMode, registerInviteText, features:{stories}}`.
+  `auth.js` lo pide al cargar el módulo (`_applyRegistrationMode`): pone `body.reg-invite` → se esconde
+  "Registrarse" (`#registerBtnWrap` y `#adServiceRegisterBtn`) y se muestra `#lgInviteNote`, salvo que haya
+  `?ref=`/`window._vipRefLocked`/código de referido cargado o atribución de pauta (`VIP.campaign.getActive()`).
+  Emite el evento `vip:access-config` (lo van a usar las historias en la tanda 3). Exporta
+  `VIP.auth.getRegistrationMode()` / `getAccessConfig()`.
+- **Diferencias con el gemelo CARGASGIROX, a propósito:** acá el registro es usuario + clave (sin SMS obligatorio) →
+  la card dice eso; no hay `usernamePrefix` (`/api/config/access` no lo devuelve); no hay `check-tdz.js` → se copió
+  `scripts/check-tdz.js` del gemelo (chequeo estático de TDZ y de rutas antes de `authMiddleware`) y se suma al flujo.
+- `?v=61` / SW `v61`; admin-sw `v38`. Sin cambios de modelos. `node --check` + `node scripts/check-tdz.js` OK.
+- **Pendiente de las próximas tandas:** 2) Alertas de estafa + Datos IA · 3) Historias · 4) Centro de avisos +
+  piloto automático.
 
 ## Sesión 2026-10-19
 

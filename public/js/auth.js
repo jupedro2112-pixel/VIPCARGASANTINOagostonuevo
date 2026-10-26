@@ -6,6 +6,37 @@ window.VIP = window.VIP || {};
 
 VIP.auth = (function () {
 
+    // #115 (réplica #748 de PICA ROJA): registro SÓLO CON INVITACIÓN. Sin link de referido (?ref=) ni atribución de
+    // publicidad, la pantalla de ingreso esconde "Registrarse" y muestra el aviso del panel (/sys_register_invite).
+    // Con invitación el registro se ve igual que siempre (el server valida el código/campaña al crear la cuenta).
+    // La config pública se pide al arrancar, sin sesión (GET /api/config/access, no-store).
+    let _registrationMode = 'open';
+    let _accessConfig = null;
+    function _applyRegistrationMode(j) {
+        try {
+            _registrationMode = j.registrationMode === 'invite' ? 'invite' : 'open';
+            let viaRef = false, viaAd = false;
+            try { viaRef = !!new URLSearchParams(location.search).get('ref'); } catch (_) {}
+            try { if (window._vipRefLocked) viaRef = true; } catch (_) {}
+            try { const ri = document.getElementById('registerReferralCode'); if (ri && ri.value.trim()) viaRef = true; } catch (_) {}
+            try { viaAd = !!(VIP.campaign && VIP.campaign.getActive && VIP.campaign.getActive()); } catch (_) {}
+            const invite = _registrationMode === 'invite' && !viaRef && !viaAd;
+            document.body.classList.toggle('reg-invite', invite);
+            const note = document.getElementById('lgInviteNote');
+            if (note) { note.textContent = invite ? (j.registerInviteText || '🔒 El registro es sólo con invitación.') : ''; note.style.display = invite ? '' : 'none'; }
+        } catch (_) {}
+    }
+    try {
+        fetch(((VIP.config && VIP.config.API_URL) || '') + '/api/config/access', { cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (j) {
+                if (!j) return;
+                _accessConfig = j;
+                _applyRegistrationMode(j);
+                try { document.dispatchEvent(new CustomEvent('vip:access-config', { detail: j })); } catch (_) {}
+            }).catch(function () {});
+    } catch (_) {}
+
     // Aplica Advanced Matching al pixel cuando el backend devolvió los hashes
     // (data.user.metaMatching). Idempotente: si se llama varias veces con el
     // mismo matching no duplica eventos. Nunca rompe la UI.
@@ -1473,6 +1504,8 @@ VIP.auth = (function () {
         handleRegister,
         handleRegisterDirect,
         maybeOfferSmsVerification,
+        getRegistrationMode: function () { return _registrationMode; }, // #115
+        getAccessConfig: function () { return _accessConfig; }, // #115
         refreshVerifyPhoneBanner,
         applyRegisterModalMode,
         handleVerifyPhoneSend,

@@ -115,6 +115,14 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   bumpear `?v` y `CACHE_VERSION` del SW al mismo número (sin eso, una carga corre
   HTML nuevo + JS viejo cacheado). Detalle completo en `docs/ARCHITECTURE.md` §7.
 
+- **Interruptores de funciones (#115, réplica de PICA ROJA vía CARGASGIROX):** `src/services/featureFlags.js`
+  → `Config['features']` `{datosIa, fraudRadar, notifCenter, autopilot, stories, legacyNotifs}`, **todo OFF por
+  default**, se prende desde COMANDOS → "🧩 Funciones". Toda ruta/cron de esas funciones consulta
+  `featureFlags.isOn()` (404 `FEATURE_OFF` / no-op). `legacyNotifs` gatea el sistema de notificaciones automáticas
+  ANTERIOR (reglas, encuesta, `_runDueSchedules`); lo manual no depende de él. Registro:
+  `Config['registrationMode']` `open` (default) | `invite` (403 `INVITE_ONLY` sin referido/campaña; aviso
+  `/sys_register_invite`). `GET /api/config/access` es público y lo pide la PWA al arrancar.
+
 - **Lotes y Cronograma (#110):** el POST `/api/admin/notif-batches` es un wrapper de
   `_createNotifBatchFromBody(body, user)`; cualquier validación/efecto nuevo del lote va en esa
   función (así lo heredan las campañas programadas). Las rutas del cronograma son
@@ -125,7 +133,10 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
 ## Flujo de trabajo del asistente
 
 1. Leer `WORKLOG.md` al iniciar.
-2. Hacer el cambio. Validar sintaxis (`node --check` en archivos tocados — no hay
-   node_modules local, así que no se puede correr el server; sólo syntax check).
+2. Hacer el cambio. Validar sintaxis (`node --check` en archivos tocados) **y, si se
+   tocó `server.js`, correr `node scripts/check-tdz.js`** (detecta usos de nivel
+   superior antes de su `require` y rutas antes de `const authMiddleware`: `node
+   --check` NO los ve y tumban el server al arrancar). No hay node_modules local,
+   así que no se puede correr el server; sólo syntax check.
 3. Actualizar `WORKLOG.md`.
 4. Commitear y pushear a `main` cuando el owner lo pida (o si pidió "todo seguido").

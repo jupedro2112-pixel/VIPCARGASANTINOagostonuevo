@@ -629,3 +629,19 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `notificationRoutes.sendBatchPush` (wrapper de `POST /api/notifications/send-batch`) en chunks;
   `manual:true` = envío a mano registrado por `setPushLogHook`. El `GET` del cronograma suma lotes
   enviados a mano y ocurrencias de ScheduledNotif como ítems de sólo lectura.
+
+## 10. Interruptores de funciones y modo de registro (#115, réplica de PICAROJA30 vía CARGASGIROX #208)
+
+- **`src/services/featureFlags.js`** — `Config['features']` = `{ datosIa, fraudRadar, notifCenter, autopilot,
+  stories, legacyNotifs }`, **todo `false` por default**, cache 30 s por proceso. `isOn(name)`, `getAll()`,
+  `set(patch, by)`. Rutas `GET/POST /api/admin/features` (POST solo admin general). Hooks `onFeaturesChanged(fn)`
+  en server.js (p. ej. limpiar lo que una función programó al apagarla). Panel: COMANDOS → "🧩 Funciones"; los
+  `.nav-item[data-feature]` se esconden si el flag está OFF (`applyFeatureNav`). Regla: **toda función replicada de
+  PICA ROJA consulta su flag** en sus rutas (responder 404 `FEATURE_OFF`/`{ok:false}` apagada) y al principio de cada cron.
+- `legacyNotifs` = el sistema automático anterior de esta página (reglas `NotificationRule`, encuesta, estrategia
+  programada `ScheduledNotif`). Los envíos manuales no dependen de él.
+- **Registro:** `Config['registrationMode']` `'open'|'invite'` (`getRegistrationMode`, `_inviteOnlyBlocks`). En
+  `invite`, `/api/auth/register` y `/api/auth/send-register-otp` → `403 INVITE_ONLY` salvo código de referido real o
+  campaña activa. Aviso `/sys_register_invite`. `GET /api/config/access` (público, no-store) publica `registrationMode`,
+  `registerInviteText` y `features.stories`; la PWA pone `body.reg-invite` (`auth.js` → `_applyRegistrationMode`) y
+  dispara el evento `vip:access-config`.
