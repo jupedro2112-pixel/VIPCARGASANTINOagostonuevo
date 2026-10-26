@@ -8,6 +8,65 @@
 
 ## Sesión 2026-10-26
 
+### 118. RÉPLICA DE PICA ROJA — tanda 4: 🧭 CENTRO DE AVISOS (recorrido, avisos de reembolso, preferencias, revisión semanal) y 🤖 PILOTO AUTOMÁTICO de notificaciones (en OFF, dos interruptores en COMANDOS)
+- **Interruptores:** `notifCenter` (recorrido por cliente + avisos "reclamá tu reembolso" + revisión semanal + preferencias del
+  cliente) y `autopilot` (campaña masiva diaria). Rutas de panel admin-only con `_ncGate(flag)` (404 `FEATURE_OFF` apagado).
+  Al **apagar** el piloto se borran sus campañas futuras (`_autopilotClearFuture`, hook `onFeaturesChanged`); al prenderlo se
+  programa al toque. **No usan IA:** son reglas (`src/services/retentionJourney.js`, `weeklyReview.js`, `src/utils/arCalendar.js`,
+  copiados de CARGASGIROX #211 y rebrandeados a VIPCARGAS; sin "niveles VIP", "misiones" ni "sorteos" en los textos).
+- **Lotes: tope único y filtros de audiencia.** `_resolveNotifBatchAudience` ahora envuelve al resolver de siempre (`…Base`, que acá
+  arranca con el caso `segment`) con `appOnly`, `monthlyCap`, `dailyCap` y `rotGroup{n,k}` (hash estable del id ⇒ los nuevos entran
+  solos a un grupo). Contadores `_notifDayCounts/_notifMonthCounts` sobre `NotifBatch.recipients` (también cuentan los lotes a mano).
+  `NotifBatch.giftType 'none'` (sólo aviso, `amount 0`, sólo modo `window`): `_createNotifBatchFromBody` lo acepta,
+  `_notifBatchChatContent` manda sólo el mensaje y el motor NO activa PromoBonus para 'none'.
+- **Preferencias del cliente** (`User.notifPrefs {level all|mine|none, fatigue}`): `GET/POST /api/notifications/prefs`; en la PWA
+  la fila "🎚️ Qué avisos querés recibir" dentro de **⚙️ Configuración** (`settingsModal`; acá no hay "Mi perfil" como en el gemelo)
+  → `VIP.notifPrefs.paint/set` (bloque al final de `app.js`); se ve sólo con el Centro prendido. Lo aplican `prefsFilter` en
+  `sendNotificationToAllUsers` ('promo') y `sendNotificationToUsernames` ('personal'), y `sendPushIfOffline` (data.kind).
+  **Fatiga:** 10 promos sin abrir la app pausan las masivas; el ping de actividad la resetea (aunque Datos IA esté apagado). Los
+  lotes "Recorrido ·" van como 'personal', el resto 'promo'.
+- **Recorrido de retención** (`_journeyTick`, cada 20 min, corre 17–19 h ART una vez por día, lock `_cronClaim('journey')`):
+  segmenta por días desde la última carga real (nuevo / enfriando 7–13 / inactivo 14–29 / perdido 30–89 / lejano 90–180),
+  un paso por día por cliente, regalos crecientes (% en la próxima carga o FICHAS según el valor del cliente: $2.000/$5.000/
+  $10.000 × multiplicador) ⇒ un lote (`NotifBatch`) por paso vía `_createNotifBatchFromBody` (modo ventana, `dailyCap:1`,
+  `monthlyCap`). Marca `User.journey.sent`. ⚠️ Con el flag prendido **regala plata real** a inactivos. Clientes con `fraudFlags`
+  o `notifPrefs.level 'none'` quedan afuera. **Adaptación JUGAYGANA:** `rolloverX: 0` (JUGAYGANA no usa multiplicador; las fichas
+  van libres) y `{daily}` = % diario más alto de `getRefundTiers()`. Panel → "🧭 Centro de avisos" (`/api/admin/notif-center`
+  GET/PUT/run): fuentes con tilde, tope mensual, segmentos de hoy, "lo que le toca hoy" con ▶ Mandar ahora, y los pasos.
+- **Avisos del reembolso** (`_refundReminderTick`, 15 min, 11–21 h): diario (a quien perdió AYER y no reclamó `RefundClaim
+  daily:<día>`), semanal (lunes y jueves, `weekly:<lunes>`) y mensual (1 y 8, `monthly:YYYY-MM`) — mismas `periodKey` que el
+  reclamo de este repo. **Adaptación JUGAYGANA (decisión):** allá "quién perdió" salía del batch de 1girox; acá se resuelve con
+  la MISMA fuente del reclamo (`referralRevenueService.getUserNetwinForDateRange` → royalty-statistics), UNA llamada por
+  jugador en serie (150 ms de pausa), sólo para quienes cargaron en los últimos 15/30/60 días y no reclamaron, tope 300 por
+  pasada; si la API falla para un jugador se saltea (si falla para todos, se reintenta en la próxima pasada). Rangos de fecha
+  de `jugaygana.get*RangeArgentinaEpoch()`. Push `kind:'personal'` con `url:'/?open=refund'` ⇒ la app abre Reembolso (app.js,
+  también por el mensaje `vip-open` del SW). Textos editables: `/sys_refund_reminder`, `/sys_refund_reminder_weekly`,
+  `/sys_refund_reminder_monthly` (sembrados). Estado `refundRemindLast`.
+- **Revisión semanal** (`_weeklyReviewTick`, lunes 10–14 h, lock): mide la semana (`_weeklyMetrics`: cargadores, volvieron,
+  **regalado/depositado desde Transaction** (este repo no tiene `DailyClose`: cargas reales de `SCHED_ADAPTER.realDepositMatch()`
+  vs tipos `bonus|refund|fire_reward`), conversión de cada paso del recorrido y de la campaña masiva, reembolsos, app, avisos
+  bajados) y decide con `weeklyReview.decide` ⇒ `Config['journeyTuning']` (nivel −2…+3 ⇒ ×% y ×fichas del recorrido, ± puntos del
+  piloto). Panel → "📏 Revisión semanal" (`/api/admin/weekly-review` + `/run`, 📋 copiar informe). Sin cohortes.
+- **Piloto automático** (`_autopilotTick`, cada 3 h, arranca a los 5 min): pre-programa `ScheduledCampaign` con `autoKey
+  'ap-YYYY-MM-DD'` (índice único sparse) para el mes en curso y el que viene: 19:00, 3 tandas cada 30 min, sólo app
+  (`appOnly`), tope 8/mes (o el del Centro), grupos que rotan, feriados/fechas comerciales argentinas (`arCalendar`) y cierre
+  de mes para todos, bono AUTOMÁTICO 4 h (`applyMode auto`, con el tope del lote; sin rollover) o aviso (día 10 y 20). Si
+  Historias está prendido, los miércoles no manda (ese día sale la historia con bono). Textos de servicio rebrandeados (sin el
+  tema "niveles VIP"; el del casino dice "PÁGINA CASINO AQUÍ"). Panel → Cronograma → card "🤖 Piloto automático"
+  (`/api/admin/cronograma-autopilot`, visible sólo con el flag) con el plan del año mes por mes; las campañas aparecen en el
+  calendario de siempre y las corre `_schedTick` (→ `_createNotifBatchFromBody`, que ya acepta `giftType 'none'`).
+- Modelos: `User.notifPrefs`, `User.journey`; `ScheduledCampaign.autoKey`; `NotifBatch.giftType 'none'` / `amount min 0`.
+  `NOTIF_BATCH_USER_SELECT` + `notifPrefs`. Configs con `setConfig`/`getConfig` (`notifCenter`, `journeyTuning`, `journeyLast`,
+  `refundRemindLast`, `weeklyReview`); `_cronClaim` usa `Config` directo con clave `cronlock_<name>` (ya en minúsculas).
+  `?v=64` / SW `v64`; admin-sw `v41`. `node --check` + `check-tdz` OK; `require` en frío de los 3 servicios nuevos OK.
+- **Riesgo conocido:** si se prende `legacyNotifs` junto con `notifCenter`, las reglas viejas de reembolso duplican los avisos.
+  `_cronClaim` es fail-open (si Mongo falla devuelve true): el `dailyCap:1` por lote limita el daño. El aviso del reembolso
+  consume llamadas a JUGAYGANA (hasta 300 por pasada, una vez por día/período): si la plataforma está lenta, la pasada tarda.
+- **No se trajo:** ofertas de bienvenida por días (#886 de PICA ROJA), historia "pagos de la semana" (#971, usaba sorteos),
+  cohortes de INICIO, stats de juego por lote (JUGAYGANA no las tiene).
+- **Cierre de la réplica (4 tandas, #115–#118):** todo OFF salvo el registro (abierto). Para probar: COMANDOS → 🧩 Funciones →
+  prender de a una. Pendiente operativo del owner: elegir qué prender en producción.
+
 ### 117. RÉPLICA DE PICA ROJA — tanda 3: 📽️ HISTORIAS manuales + 📖 automáticas (en OFF, interruptor en COMANDOS)
 - **Qué es:** historias estilo Instagram en la app: botón **"Historias"** en el header (antes del grupo de la derecha,
   oculto hasta que la función esté prendida), **anillo** en la pantalla de ingreso debajo del logo (historias públicas)

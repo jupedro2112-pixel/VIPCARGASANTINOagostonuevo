@@ -469,6 +469,12 @@ function setupEventListeners() {
         if (VIP.publisherWelcome && typeof VIP.publisherWelcome.init === 'function') {
             VIP.publisherWelcome.init();
             try { if (VIP.stories) VIP.stories.init(); } catch (e) {} // #117 historias (visor + aviso del SW)
+            // #118: la push "reclamá tu reembolso" trae /?open=refund ⇒ abrir Reembolso (al entrar por la notificación o, con la app abierta, por el aviso del SW)
+            try {
+                const openRefund = () => { try { if (VIP.state && VIP.state.currentToken && VIP.refunds && VIP.refunds.showRefundModal) VIP.refunds.showRefundModal('daily'); } catch (_) {} };
+                if (/[?&]open=refund\b/.test(location.search)) { try { history.replaceState(null, '', location.pathname); } catch (_) {} setTimeout(openRefund, 1500); }
+                if (navigator.serviceWorker) navigator.serviceWorker.addEventListener('message', (e) => { const d = e && e.data; if (d && d.type === 'vip-open' && /[?&]open=refund\b/.test(String(d.url || ''))) openRefund(); });
+            } catch (_) {}
         }
 
         // Cambio de contraseña — entrada temporal (fallback cuando el SMS no llega)
@@ -487,6 +493,7 @@ function setupEventListeners() {
             const pendingBlock = document.getElementById('verifyPhonePendingBlock');
             const isPending = VIP.state.currentUser && VIP.state.currentUser.phoneVerificationPending === true;
             if (pendingBlock) pendingBlock.style.display = isPending ? '' : 'none';
+            try { if (VIP.notifPrefs) VIP.notifPrefs.paint(); } catch (_) {} // #118 qué avisos quiere recibir
             VIP.ui.showModal('settingsModal');
         });
 
@@ -563,3 +570,25 @@ function setupEventListeners() {
         console.error('[setupEventListeners] Error al registrar listeners (app parcialmente funcional):', err);
     }
 }
+
+// #118 (réplica #971 de PICA ROJA): "Qué avisos querés recibir" en ⚙️ Configuración (GET/POST /api/notifications/prefs).
+// Con el Centro de avisos apagado el server responde enabled:false y la fila no se muestra. No toca el permiso del teléfono.
+(function () {
+    window.VIP = window.VIP || {};
+    function hint(v) { const h = document.getElementById('pfAvisosHint'); if (h) h.textContent = v === 'none' ? 'Sólo Soporte y tus cargas y retiros' : v === 'mine' ? 'Tu reembolso y los regalos para vos; nada masivo' : 'Bonos del día, novedades y todo lo tuyo'; }
+    function paint() {
+        const row = document.getElementById('pfAvisosRow'), sel = document.getElementById('pfAvisosSel'); if (!row || !sel || !VIP.state || !VIP.state.currentToken) return;
+        fetch(VIP.config.API_URL + '/api/notifications/prefs', { headers: { 'Authorization': 'Bearer ' + VIP.state.currentToken } }).then((x) => x.json()).then((j) => {
+            if (!j || !j.success || j.enabled === false) { row.style.display = 'none'; return; }
+            row.style.display = ''; sel.value = j.level || 'all'; hint(sel.value);
+        }).catch(() => {});
+    }
+    async function set(v) {
+        try {
+            const x = await fetch(VIP.config.API_URL + '/api/notifications/prefs', { method: 'POST', headers: { 'Authorization': 'Bearer ' + VIP.state.currentToken, 'Content-Type': 'application/json' }, body: JSON.stringify({ level: v }) });
+            const j = await x.json(); if (!(j && j.success)) throw new Error((j && j.error) || 'error');
+            hint(j.level); try { VIP.ui.showToast('Listo, guardado ✓', 'success'); } catch (_) {}
+        } catch (_) { try { VIP.ui.showToast('No se pudo guardar, probá de nuevo', 'error'); } catch (__) {} paint(); }
+    }
+    VIP.notifPrefs = { paint, set };
+})();

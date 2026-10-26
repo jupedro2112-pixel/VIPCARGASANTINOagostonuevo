@@ -128,6 +128,11 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   "+X%" de una historia se aplica en la carga con `_applyStoryBonusOnDeposit` (mismo contrato que el % de la ruleta:
   manual sin bonus del agente + hgcash, antes del lote; source `story_bonus`). En el panel `deleteStory`/`submitNewStory`
   son de las historias de INFLUENCERS: las de la app se llaman `*AppStory`. El SW reenvía `data.url` de la push (`vip-open`).
+  Tanda 4 (#118): **Centro de avisos** (`notifCenter`: recorrido `retentionJourney`, avisos del reembolso con netwin POR
+  JUGADOR vía `referralRevenueService`, revisión semanal, `User.notifPrefs` + `prefsFilter`) y **piloto automático**
+  (`autopilot`: `ScheduledCampaign.autoKey`, 19 h, 3 tandas, `appOnly`). `_resolveNotifBatchAudience` es un wrapper
+  (`appOnly/monthlyCap/dailyCap/rotGroup`) sobre `…Base`; `NotifBatch.giftType 'none'` = sólo aviso. Un lote/push automático
+  nuevo tiene que llevar `data.kind` ('promo'|'personal') para respetar las preferencias del cliente.
 
 - **Lotes y Cronograma (#110):** el POST `/api/admin/notif-batches` es un wrapper de
   `_createNotifBatchFromBody(body, user)`; cualquier validación/efecto nuevo del lote va en esa

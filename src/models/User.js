@@ -174,6 +174,11 @@ const userSchema = new mongoose.Schema({
   // #117 HISTORIA CON BONO (réplica #742 de PICA ROJA): +pct% reclamado desde una historia, se aplica en la PRÓXIMA carga
   // (server: _applyStoryBonusOnDeposit, mismo pipeline que el % de la ruleta) mientras no venza (expiresAt = fin del bono de la historia).
   storyBonus: { storyId: { type: String, default: null }, pct: { type: Number, default: 0 }, label: { type: String, default: null }, claimedAt: { type: Date, default: null }, expiresAt: { type: Date, default: null } },
+  // #118 CENTRO DE AVISOS (réplica #971 de PICA ROJA): qué avisos quiere el cliente ('all' | 'mine' | 'none'; Configuración) y la
+  // "fatiga" (promos seguidas sin abrir la app; 10 ⇒ se pausan las masivas hasta que entre; la resetea /api/activity/ping).
+  notifPrefs: { level: { type: String, default: 'all' }, updatedAt: { type: Date, default: null }, fatigue: { type: Number, default: 0 } },
+  // #118 RECORRIDO DE RETENCIÓN: pasos ya enviados ("<paso>@<episodio>"), último paso y segmento. Lo escribe sólo _journeyTick.
+  journey: { segment: { type: String, default: null }, lastStep: { type: String, default: null }, lastAt: { type: Date, default: null }, sent: { type: [{ k: String, at: Date }], default: [] } },
   dailyRoulettePendingPct: { type: Number, default: 0 },
   dailyRoulettePendingLabel: { type: String, default: null },
   dailyRouletteWonAt: { type: Date, default: null },

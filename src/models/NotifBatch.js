@@ -33,8 +33,9 @@ const notifBatchSchema = new mongoose.Schema({
   // carga, cartel verde, o automático según applyMode). fixed = regalo de
   // fichas: SIEMPRE se acredita solo (individual_bonus en JUGAYGANA) — en modo
   // 'code' al canjear, en modo 'window' al enviarse el lote.
-  giftType: { type: String, enum: ['percent', 'fixed'], required: true },
-  amount: { type: Number, required: true, min: 1 },
+  // #118: 'none' = sólo aviso (sin regalo) — lo usan el recorrido de retención y el piloto automático.
+  giftType: { type: String, enum: ['percent', 'fixed', 'none'], required: true },
+  amount: { type: Number, required: true, min: 0 }, // 0 con 'none'
 
   // APLICACIÓN del % (owner 2026-09-04): 'auto' = el sistema lo suma SOLO en
   // la carga (manual sin bonus del agente / hgcash), sin cartel que marcar;
