@@ -8,6 +8,51 @@
 
 ## Sesión 2026-10-26
 
+### 116. RÉPLICA DE PICA ROJA — tanda 2: 🚨 ALERTAS DE ESTAFA y 🧠 DATOS IA 🔒 (ambas en OFF, interruptor en COMANDOS)
+- **Alertas de estafa** (`src/services/fraudRadar.js`, copiado 1:1 de CARGASGIROX #209 / PICA ROJA #873/#877/#952): reglas
+  que cruzan los datos (CBU de carga/retiro compartido, mismo celular por token de push o ID del celular, mismo número de
+  teléfono, terceros que cargan, retiro a nombre de otro, abuso de bonos, retiro casi sin jugar, cuenta nueva con retiro
+  grande, ciclo carga→retiro, granja de referidos, marcas previas, sin teléfono) y suman PUNTAJE (60+ alto, 30–59 medio)
+  con la evidencia. **Nada se bloquea solo.** Rutas `GET /api/admin/fraud/alerts?days=&fresh=` (cache 5 min),
+  `GET /api/admin/fraud/case/:id` (caso completo), `POST /api/admin/fraud/review/:id` (legit/watch/clear →
+  `User.fraudReview` + `fraudNotes`). Bloquear usa el `/api/admin/users/:id/block` de siempre. **Solo admin general**
+  (`_fraudGate`) y `featureFlags.fraudRadar` (apagado ⇒ 404 `FEATURE_OFF`). Sin crons. Panel: menú "🚨 Alertas de estafa"
+  (`data-feature="fraudRadar"`, oculto si está OFF), sección `#fraudSection`, caso en `#frCaseModal`.
+  **Adaptación JUGAYGANA (decisión):** en el gemelo las reglas de JUEGO usan `girox.getPlayersStatsBatch` (apostado/netwin
+  por lote). Acá el netwin sale de `royalty-statistics` (`referralRevenueService.getUserNetwinForDateRange`), UNA llamada
+  por jugador con sesión flaky → el radar corre **sin `deps.stats`** (el servicio lo contempla: `wag == null`): las reglas
+  "retira casi sin jugar", "cuenta nueva con retiro grande" y "ciclo carga→retiro" se evalúan sólo con la plata y el abuso
+  de bonos no se descarta por juego. Si algún día hay una fuente por lote, se inyecta `stats` y listo.
+- **Datos IA** (`src/services/datosIaService.js` + modelos `AppSession` (TTL 180 d) y `DatosIaSnapshot` (TTL 2 años),
+  copiados 1:1; **no usa IA**: son agregaciones de Mongo). Pestañas Panorama (inversión y proyección con calibración),
+  Cierre de ayer (base retenida), Análisis por fechas (KPIs, informe con semáforos, escalera post 1ª carga, serie, gasto
+  en pauta), Comparativa con "la otra página" (números a mano) e Historial. Rutas bajo `/api/admin/datos-ia/*` con un
+  `app.use` que exige: función prendida (`featureFlags.datosIa`) → admin general → **clave propia** si está cargada
+  (`Config['datosIaPinHash']` sha256, header `x-datos-pin`, 423 `PIN_REQUIRED`; 6 fallos ⇒ 15 min 429). Clave en COMANDOS
+  → "🔒 Clave de Datos IA" (`/api/admin/datos-ia-pin`). Cotización USDT manual o de criptoya (público, sin clave). Las
+  configs (`usdtRate`, `adSpend`, `adSpendTotal`, `otherPageStats`, `projectionCalibration`, `datosIaPinHash`) se guardan
+  con `setConfig`/`getConfig` de este repo (allá era `Config.set`).
+  **Adaptación JUGAYGANA de `_diaPromoConfig`:** bono 1ª carga = bono automático hgcash de primera carga
+  (`getHgcashAppBonusConfig().firstPct` hasta `firstCapARS` + `firstExcessPct`), bono automático por carga = `allPct`
+  mientras siga vigente (`HGCASH_APP_BONUS_20_UNTIL`), reembolsos = % más alto de los rangos por tipo (`getRefundTiers()`
+  daily/weekly/monthly), ruleta = promedio ponderado de los premios en % (igual que allá). Todo entre try/catch.
+  Campos que usa el servicio y existen acá: `Transaction.timestamp/status/metadata.source`, `RefundClaim.claimedAt`,
+  `DailyRouletteSpin.spunAt/prizeARS`, `Message.senderRole/timestamp`, `BankMovement`, `PendingPayout`. Los tipos de
+  Transaction que acá no existen (`roulette`, `rakeback`, `vip_levelup`, `install_gift`, `mission`) simplemente no
+  matchean (la ruleta acá es tipo `bonus` con `source:'daily_roulette'`, así que igual cuenta como regalo).
+- **Medidor de uso de la app**: `public/js/activity.js` pinguea `POST /api/activity/ping` cada 60 s con la app visible
+  (sesión nueva si pasan >3 min) + `window.VIP_DEVICE` (modelo/OS/pantalla, bloque inline en index.html) + ID propio
+  del celular (`localStorage.vip_device_id`) → `User.lastDevice` y `User.deviceIds` (últimos 6), que también cruzan las
+  Alertas de estafa. Con Datos IA apagado el server responde `{ok:false, off:true}` y la app deja de pinguear en esa
+  sesión. (`homePanelMode` no existe acá → `mode` viaja null.)
+- `User`: + `lastDevice`, `deviceIds` (index), `fraudFlags`, `fraudNotes`, `fraudReview`. Panel: `admin.css` suma las
+  reglas `.dia` con las variables `--p-*` mapeadas al tema oscuro + `#fraudSection .card` (este panel no tenía `.card`);
+  `authFetch` agrega `x-datos-pin` a `/api/admin/datos-ia/`; `datosIaGate` pide la clave una vez por sesión
+  (sessionStorage `datos_pin`); `_featureOnOrToast` avisa si se entra a una sección apagada. `?v=62` / SW `v62`,
+  admin-sw `v39`. `node --check` + `check-tdz` OK.
+- **No se trajo (igual que en el gemelo):** la sección INICIO de PICA ROJA, "clave para Datos/Datos 2.0/Cierres" y
+  `STAFF_DENY_MUTATIONS` (acá se resolvió con admin-only en las rutas nuevas).
+
 ### 115. RÉPLICA DE PICA ROJA (PICAROJA30) — tanda 1: interruptores en COMANDOS, registro abierto / sólo con invitación, sistema de notificaciones anterior APAGADO y al fondo del menú
 - **Owner:** replicar de `PICAROJA30` seis cosas (Datos IA, Centro de avisos, Alertas de estafa, notificaciones
   programadas nuevas, registro activado/desactivado, historias) en los 7 repos, **todo en OFF** salvo el registro

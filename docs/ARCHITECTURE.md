@@ -645,3 +645,18 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   campaña activa. Aviso `/sys_register_invite`. `GET /api/config/access` (público, no-store) publica `registrationMode`,
   `registerInviteText` y `features.stories`; la PWA pone `body.reg-invite` (`auth.js` → `_applyRegistrationMode`) y
   dispara el evento `vip:access-config`.
+
+### 10.1 Alertas de estafa y Datos IA (#116)
+
+- **Alertas de estafa:** `src/services/fraudRadar.js` (`scan(deps,{days})`, `caseFile(deps,userId)`, `RULES`). Rutas
+  `/api/admin/fraud/alerts|case/:id|review/:id`, gate `_fraudGate` (flag `fraudRadar` + admin general). Campos de
+  `User`: `fraudFlags`, `fraudNotes`, `fraudReview{status legit|watch|null,by,at,note}`, `lastDevice`, `deviceIds`.
+  Un cliente `legit` no vuelve a aparecer. Usa `PendingPayout`, `BankMovement`, `Transaction`. **Sin stats de juego**
+  (JUGAYGANA no tiene consulta por lote): `deps.stats` no se inyecta y las reglas de juego se evalúan sólo con la plata.
+- **Datos IA:** `src/services/datosIaService.js` (`analyze`, `compare`, `project`, `review`, `dailyRetained`,
+  `dayTotals`, `dateKeyART`; cache 5 min por proceso), modelos `AppSession` (TTL 180 d) y `DatosIaSnapshot` (TTL 2 años).
+  `app.use('/api/admin/datos-ia')` = flag `datosIa` → admin general → clave (`Config['datosIaPinHash']`, header
+  `x-datos-pin`, 423/429). Config (vía `getConfig`/`setConfig`): `datosIaPinHash`, `usdtRate`, `adSpend`, `adSpendTotal`,
+  `otherPageStats`, `projectionCalibration`. `_diaPromoConfig` lee `getHgcashAppBonusConfig()`, `getRefundTiers()` y
+  `getDailyRouletteConfig()`. `POST /api/activity/ping` (rol user) arma las sesiones y escribe `lastDevice`/`deviceIds`;
+  apagado ⇒ `{ok:false, off:true}`. Cliente: `public/js/activity.js` + `window.VIP_DEVICE` (index.html).

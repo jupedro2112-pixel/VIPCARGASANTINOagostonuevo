@@ -122,6 +122,8 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   ANTERIOR (reglas, encuesta, `_runDueSchedules`); lo manual no depende de él. Registro:
   `Config['registrationMode']` `open` (default) | `invite` (403 `INVITE_ONLY` sin referido/campaña; aviso
   `/sys_register_invite`). `GET /api/config/access` es público y lo pide la PWA al arrancar.
+  Tanda 2 (#116): `fraudRadar.js` (sin stats de juego: JUGAYGANA no tiene consulta por lote) y `datosIaService.js`
+  (rutas `/api/admin/datos-ia/*` con clave propia `x-datos-pin`; configs con `getConfig`/`setConfig`).
 
 - **Lotes y Cronograma (#110):** el POST `/api/admin/notif-batches` es un wrapper de
   `_createNotifBatchFromBody(body, user)`; cualquier validación/efecto nuevo del lote va en esa

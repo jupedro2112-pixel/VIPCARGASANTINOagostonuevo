@@ -162,6 +162,15 @@ const userSchema = new mongoose.Schema({
   // "% EXTRA en la próxima carga" pendiente. Lo consume la próxima carga (manual
   // sin bonus del agente / hgcash) con reserva atómica (pct>0 → 0) y reversión si
   // el crédito falla limpio. Vence a las 24 h del giro (dailyRouletteWonAt).
+  // #116 (réplica #823/#952 de PICA ROJA): último teléfono con el que entró { os, model, w, h, dpr, app, id, at } y los
+  // últimos 6 IDs propios del celular (los manda /api/activity/ping; las Alertas de estafa cruzan cuentas por ellos).
+  lastDevice: { type: mongoose.Schema.Types.Mixed, default: null },
+  deviceIds: { type: [String], default: [], index: true },
+  // #116 ALERTAS DE ESTAFA (réplica #873 de PICA ROJA): banderas del sistema, notas y revisión de una alerta:
+  // 'legit' (revisado, no se vuelve a mostrar) | 'watch' (en observación). by/at/note de quién lo revisó.
+  fraudFlags: { type: [String], default: [] },
+  fraudNotes: { type: [{ at: Date, note: String }], default: [] },
+  fraudReview: { status: { type: String, default: null }, by: { type: String, default: null }, at: { type: Date, default: null }, note: { type: String, default: null } },
   dailyRoulettePendingPct: { type: Number, default: 0 },
   dailyRoulettePendingLabel: { type: String, default: null },
   dailyRouletteWonAt: { type: Date, default: null },

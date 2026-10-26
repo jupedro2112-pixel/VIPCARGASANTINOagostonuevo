@@ -1,4 +1,4 @@
-// #208 (owner 2026-10-26): INTERRUPTORES de las funciones replicadas de PICA ROJA (PICAROJA30).
+// #115 (owner 2026-10-26): INTERRUPTORES de las funciones replicadas de PICA ROJA (PICAROJA30).
 // Todas arrancan APAGADAS y se prenden/apagan desde el panel → COMANDOS → "🧩 Funciones" (solo admin
 // general). Viven en Config['features'] = { datosIa, fraudRadar, notifCenter, autopilot, stories, legacyNotifs }.
 // Cache de 30 s por proceso (en AWS EB cada instancia refresca sola; apagar algo tarda como mucho 30 s).
