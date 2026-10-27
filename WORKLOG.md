@@ -8,6 +8,18 @@
 
 ## Sesión 2026-10-26
 
+### 119. 📣 Meta: la CARGA AUTOMÁTICA del banco ahora manda el `Purchase` (antes el píxel recibía el registro pero no la venta)
+- **Qué pasaba:** `hgcashAutoCarga` (transferís y se acredita sola) no llamaba a `metaCapi.track('Purchase')` ni al aviso de fb-ads:
+  sólo lo hacían la carga manual del agente y la autogestionada. Como casi todas las cargas entran por el banco, Meta (píxel propio y
+  píxeles de publicistas) veía registros y casi ninguna compra. PAUTANUEVAsantino lo había arreglado el 2026-08-24; acá nunca se pasó.
+- **Fix (réplica del de PAUTA):** en el camino de éxito de `hgcashAutoCarga`, `Purchase` con `content_name 'deposit_hgcash'`, `value/currency`,
+  `order_id` = id de la operación, `externalId` del cliente (así va al píxel de SU publicista según el alcance), **IP y navegador del registro**
+  (`metaCapiService.buildUserData` ahora usa `userInfo.clientIp/clientUserAgent` cuando no hay request) y `eventSourceUrl` = su landing.
+  Esta página no tiene `_isFirstDeposit` ni filtro FTD en el servicio ⇒ se manda cada carga.
+  Fire-and-forget dentro de try/catch: nunca frena la acreditación. Sólo servidor (sin SW). Archivos: `server.js`, `src/services/metaCapiService.js`.
+- **Ojo (Meta):** si un píxel tiene cargado un "código de prueba" (`META_TEST_EVENT_CODE_n` o el campo del panel), TODOS sus eventos salen como
+  prueba y no cuentan como conversiones: dejarlo vacío fuera de las pruebas.
+
 ### 118. RÉPLICA DE PICA ROJA — tanda 4: 🧭 CENTRO DE AVISOS (recorrido, avisos de reembolso, preferencias, revisión semanal) y 🤖 PILOTO AUTOMÁTICO de notificaciones (en OFF, dos interruptores en COMANDOS)
 - **Interruptores:** `notifCenter` (recorrido por cliente + avisos "reclamá tu reembolso" + revisión semanal + preferencias del
   cliente) y `autopilot` (campaña masiva diaria). Rutas de panel admin-only con `_ncGate(flag)` (404 `FEATURE_OFF` apagado).

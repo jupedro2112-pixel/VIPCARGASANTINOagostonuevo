@@ -2224,6 +2224,19 @@ async function hgcashAutoCarga({ movement, comprobante, mode }) {
       ? (appBonus.kind !== 'lote' ? ` 🎁 + BONO AUTOMÁTICO ${appBonus.pct}% ${appBonus.kind === 'install_100' ? '(primera carga, app instalada)' : (appBonus.kind === 'story' ? '(bono de HISTORIA, ya utilizado)' : (appBonus.kind === 'roulette' ? '(ruleta diaria, ya utilizado)' : '(app instalada)'))}: $${Number(appBonus.amount).toLocaleString('es-AR')}.` : ` ⚡ + BONO DE LOTE AUTOMÁTICO +${appBonus.pct}% (${appBonus.loteLabel}): $${Number(appBonus.amount).toLocaleString('es-AR')}. ${appBonus.loteScope === 'first' ? 'El bono quedó USADO.' : 'El bono sigue vigente para sus próximas cargas.'} No hay que marcar nada.`)
       : '';
     await _emitAdminOnlyChatNote(user.id, user.username, `🏦 ✅ CARGA AUTOMÁTICA hgcash — ${dataDesc}. Acreditado.${bonusNote}`);
+    // #119 (réplica del fix del 2026-08-24 de PAUTANUEVAsantino): la AUTO-CARGA no disparaba el Purchase a Meta ⇒ el píxel propio y los de los
+    // publicistas recibían el registro pero NO la venta (acá casi todas las cargas entran por el banco). Mismo evento que la carga manual, con la
+    // IP/navegador del registro del jugador (mejor matcheo) y la URL de la landing. Fire-and-forget: nunca frena la carga.
+    try {
+      metaCapi.track(
+        'Purchase',
+        { email: user.email, phone: user.phone, externalId: user.id, fbc: user.metaFbc, fbp: user.metaFbp, clientIp: user.registrationIp, clientUserAgent: user.registrationUserAgent },
+        { value: Number(amount), currency: 'ARS', content_name: 'deposit_hgcash', content_type: 'product', content_category: metaCapi.valueCategory(Number(amount)),
+          order_id: (result && result.data && (result.data.transfer_id || result.data.transferId)) || (typeof txId !== 'undefined' ? txId : null) },
+        { eventSourceUrl: user.landingUrl || undefined }
+      );
+      fbAdsWebhook.notify('Purchase', user, { value: Number(amount), currency: 'ARS' });
+    } catch (_) {}
     _emitHgcashUpdate('cargado');
     logger.info(`[hgcash] auto-carga OK user=${user.username} amount=$${amount} movement=${movement.movementId}`);
   } catch (e) {
