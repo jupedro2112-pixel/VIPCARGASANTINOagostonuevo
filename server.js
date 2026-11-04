@@ -4625,7 +4625,7 @@ app.post('/api/auth/platform-login', authMiddleware, async (req, res) => {
     res.json({
       success: true,
       jugayganaToken: jgLogin.token,
-      platformUrl: 'https://www.jugaygana44.bet'
+      platformUrl: getCasinoPlayUrl() // #120
     });
   } catch (error) {
     logger.error(`Error en platform-login: ${error.message}`);
@@ -4772,6 +4772,36 @@ app.post('/api/auth/login-otp-verify', authLimiter, async (req, res) => {
       const adminCookieToken = jwt.sign(
         { userId: userId, username: userObj.username, role: userObj.role, tokenVersion: userObj.tokenVersion ?? 0 },
         JWT_SECRET,
+// #120 (réplica #247 de SANTINOGANAMOS) PÁGINA DEL CASINO editable en COMANDOS → `/sys_casino_url`.
+// Vacío = la de siempre (JUGAYGANA_PLAY_URL en EB o https://www.jugaygana44.bet). En JUGAYGANA no hay
+// login automático al casino (el modal le copia usuario y clave y abre la página), así que cambia SOLO el
+// link. La PWA lo pide sin caché al abrir el modal del casino (`GET /api/config/casino-url`). Se relee al
+// arrancar, cada 60 s (las otras instancias de EB) y al guardar el comando (esta instancia, al instante).
+// 🔒 Solo el admin general lo cambia: el modal muestra la clave del cliente, un link falso se la robaría.
+const CASINO_URL_DEFAULT = 'https://www.jugaygana44.bet';
+let _casinoUrlOverride = null;
+function getCasinoPlayUrl() {
+  return (_casinoUrlOverride || process.env.JUGAYGANA_PLAY_URL || CASINO_URL_DEFAULT).replace(/\/+$/, '');
+}
+function _cleanCasinoUrl(raw) {
+  const v = String(raw || '').trim().split(/\s+/)[0] || '';
+  if (!v) return '';
+  try {
+    const u = new URL(/^https?:\/\//i.test(v) ? v : 'https://' + v);
+    if (!/^https?:$/.test(u.protocol) || !u.hostname.includes('.')) return null;
+    return u.toString().replace(/\/+$/, '');
+  } catch (_) { return null; }
+}
+async function _refreshCasinoUrl() {
+  try {
+    const cmd = await Command.findOne({ name: '/sys_casino_url', isActive: true }).lean();
+    const url = _cleanCasinoUrl(cmd && cmd.response);
+    const prev = getCasinoPlayUrl();
+    _casinoUrlOverride = url || null;
+    if (getCasinoPlayUrl() !== prev) logger.info(`[casino-url] el botón del casino ahora abre ${getCasinoPlayUrl()}`);
+  } catch (e) { logger.warn(`[casino-url] no se pudo leer /sys_casino_url: ${e.message}`); }
+}
+
         { expiresIn: '8h' }
       );
       res.setHeader('Set-Cookie', buildAdminSessionCookieHeaders(adminCookieToken));
@@ -9475,6 +9505,13 @@ app.post('/api/movements/deposit', authMiddleware, depositorMiddleware, async (r
         const selfServiceOrderId = result.data?.transfer_id || result.data?.transferId || null;
         metaCapi.track(
           'Purchase',
+    {
+      // #120 NO es un mensaje: a qué página manda el botón del casino (modal → Abrir Casino).
+      name: '/sys_casino_url',
+      description: 'PÁGINA DEL CASINO (no es un mensaje). Escribí SOLO la dirección a la que manda el botón Abrir Casino, por ejemplo https://www.jugaygana44.bet. Si la página cambia o deja de andar, la cambiás acá y listo (tarda hasta 1 minuto). Vacío = la de siempre. Solo el admin general la puede cambiar.',
+      type: 'info',
+      response: ''
+    },
           { email: u && u.email, phone: u && u.phone, externalId: req.user.userId, fbc: u && u.metaFbc, fbp: u && u.metaFbp },
           {
             value: parseFloat(amount),
@@ -15845,6 +15882,13 @@ app.get('/api/admin/referrals/:userId/netwin', authMiddleware, adminMiddleware, 
     });
     const sumNet = rows.reduce((a, r) => a + (r.netwinMonth === null ? 0 : Math.max(0, r.netwinMonth)), 0);
     res.json({ success: true, period: { key: _periodKey.getCurrentPeriodKey(), label: _periodKey.getPeriodLabel(_periodKey.getCurrentPeriodKey()) },
+    // #120 página del casino: solo el admin general y tiene que ser una dirección web válida (vacía = la de siempre).
+    if (name === '/sys_casino_url') {
+      if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo el administrador general puede cambiar la página del casino.' });
+      if (String(response || '').trim() && !_cleanCasinoUrl(response)) {
+        return res.status(400).json({ error: 'Poné sólo la dirección de la página del casino, por ejemplo https://www.jugaygana44.bet' });
+      }
+    }
       rate: lv.rate, pct: lv.pct, mode: lv.mode, active: activeCount,
       totals: { netwinMonth: Math.round(sumNet), commissionMonth: Math.round(sumNet * lv.rate), partial: rows.some(r => r.netwinMonth === null), skipped: Math.max(0, refs.filter(r => depBy.has(r.id)).length - withDeposits.length) },
       referrals: rows });
@@ -15858,6 +15902,7 @@ const referralRoutes = require('./src/routes/referralRoutes');
 app.use('/api/referrals', referralRoutes);
 
 // ============================================================================
+    if (name === '/sys_casino_url') await _refreshCasinoUrl(); // #120 esta instancia, al instante
 // RULETA DIARIA — 1 giro/día por user con PWA + notifs. Auto-credit JUGAYGANA.
 // ============================================================================
 const DailyRouletteSpin = require('./src/models/DailyRouletteSpin');
@@ -20821,6 +20866,12 @@ app.get('/api/admin/encuesta/reportes', authMiddleware, adminMiddleware, async (
 // (owner 2026-06-21): solo a quien NO carga hace ≥7d, bono ≤30%, vence en ≤2h.
 // Los topes se fuerzan acá (merge) Y en inactividadService (defensa en profundidad).
 const REFUND_INACT_MAX_PCT = 30;       // tope de % de bono
+// #120 página del casino (pública: la PWA la pide al abrir el modal del casino).
+app.get('/api/config/casino-url', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ success: true, url: getCasinoPlayUrl() });
+});
+
 const REFUND_INACT_MAX_VIG_HORAS = 2;  // tope de vigencia (horas)
 const REGALO_TA_MAX_ARS = 3000;        // tope del regalo de reactivación ticket alto
 const INACTIVIDAD_DEFAULTS = {
@@ -21109,4 +21160,6 @@ if (process.env.VERCEL) {
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   })();
-}
+}    _refreshCasinoUrl(); // #120
+    await _refreshCasinoUrl(); // #120 página del casino desde COMANDOS
+    setInterval(() => { _refreshCasinoUrl(); }, 60 * 1000);
