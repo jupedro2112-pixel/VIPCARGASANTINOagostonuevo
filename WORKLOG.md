@@ -4,9 +4,57 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-29**
+> **Última actualización: 2026-11-20**
+
+## Sesión 2026-11-20
+
+### 123. 🏛️ BANCOS completo: Finpro (segundo banco con API, hasta 3 cuentas) + 🏦 Bancos automáticos + rotación automática + pagar por el otro banco — réplica #202, #207–#210, #212–#214 y #216 de AUTOREEMBOLSOSjygactivo — admin-sw v45
+- **Owner:** replicar acá "tal cual quedó" todo lo de bancos de AUTOREEMBOLSOSjygactivo. Este repo ya tenía las 3 cuentas hgcash (#121) y la
+  sección 🏛️ Bancos — Configuración (#122); faltaba Finpro entero y todo lo posterior. El código de bancos quedó IGUAL al de la fuente
+  (bloques comparados con `diff`), salvo las adaptaciones de abajo. NO se trajo la mudanza a jugaygana.io ni `plat.*`: la plata sigue por
+  los clientes de siempre (`jugaygana.depositToUser` en `hgcashAutoCarga`, `_deductChipsAtConfirm` en el retiro).
+- **Finpro (#202):** `src/services/finproService.js` (nuevo, idéntico a la fuente). Hasta 3 cuentas en `Config['finproAccounts']` (cifradas con
+  `_credEncrypt`; panel > SSM `FINPRO_*`), una EN USO y las otras de respaldo. Cargas: webhook `POST /api/finpro/webhook` (firmado, fail-closed
+  en producción sin secreto) → `_finproIngestIncoming` → `BankMovement` con `provider:'finpro'` + `accountKey` → el MISMO pipeline de hgcash
+  (`hgcashMatchFromMovement` / `hgcashAutoCarga`); respaldo: verificación del comprobante (`_finproVerifyComprobante`, re-verifica cada 2 min
+  hasta 90 min). Retiros: `_payPayoutViaFinpro` (un lote por pago, `fpProcessId`/`fpTransactionId`/`fpAccountKey`), estado por
+  `_finproSyncPayout` (poll, botón, callback `POST /api/finpro/callback`). `handlePayoutStatusWebhook(p, provider)` sirve a los dos bancos.
+- **🏦 Bancos automáticos (tres llaves, #202):** por dónde ENTRAN las cargas (`hgcash.enabled` / `Config['finpro']`), por dónde SALEN los
+  retiros (`Config['bankProvider']` → `getBankProvider()`) y qué cuenta VE el cliente (`Config['bankShown']` → `getBankShown()`: solo ese
+  banco reescribe `Config['cbu']`). Defaults = todo por hgcash, o sea **sin tocar nada el comportamiento es el de antes**.
+- **Rotación automática (#207, #210, #213, #216):** card 🔁 en Bancos — Configuración, TODO apagado por defecto. `Config['bankRotation']` +
+  `_bankRotationTick` (cada 2 min): rota la cuenta en uso por caída (N controles) o por tope día/mes de plata entrante; destino elegible por
+  cuenta ("Al rotar pasa a"); otro banco solo con `crossBank`; `movePayouts` mueve también los retiros (solo por caída); vueltas (`loop`,
+  `Config['bankRotationLap']`) cuando todas llegan al tope del DÍA (el del mes no da vueltas); candado `Config['bankRotationLock']`.
+  Nota interna "transfirió a una cuenta que NO es la que está en uso" en la carga automática (#207).
+- **Barra única (#208):** `GET/POST /api/admin/bank-in-use` (admin/depositor/withdrawer) con las cuentas de los dos bancos.
+  ⚠️ **Adaptación:** en la fuente vive en la sección 🏦 Banco (bandeja), que este repo NO tiene → acá quedó arriba de 🏛️ Bancos —
+  Configuración (solo admin general la ve). `loadBanksConfigSection()` la carga y `bankUseAccount()` refresca las cards de abajo.
+- **Retiros desde el chat (#213/#214):** `POST /api/admin/payouts/:id/pay` acepta `body.provider` (pagar ESE retiro por el otro banco) y
+  `confirmOtherBank` (409 `needsConfirm` si hubo un intento anterior dudoso por el otro banco). Botones: **💸 Pagar / 🔁 Pagar nuevamente** ·
+  **🏦 Pagar con otro banco** (solo si el otro banco está listo) · **✅ Ya lo pagué por fuera** (el botón viejo que marca pagado a mano).
+- **#212:** `POST /api/admin/hgcash/accounts` y `/finpro/accounts` exigen CBU/CVU de 22 dígitos + alias (alta y edición), y al reescribir
+  `Config['cbu']` ya no se hereda nada de la cuenta anterior. **#209:** sin carteles de "URL de desarrollo" de Finpro.
+- **Arreglo que vino con el #202:** el bloque de hgcash estaba DUPLICADO en `index.html` (seguía en COMANDOS además de Bancos —
+  Configuración: 36 ids repetidos, `getElementById` agarraba el de COMANDOS, oculto). Se sacó el de COMANDOS, como hizo la fuente.
+- **Adaptaciones por lo que este repo no tiene** (bandeja del banco / cierre diario / bajadas #155, alertas por Telegram, auditoría IA,
+  "CBU de otro proyecto"): `handlePayoutStatusWebhook` sin la rama de bajadas; `telegramAlert` es un stub inerte (los avisos de rotación y
+  de "posible pago doble" quedan solo en nota interna del chat y log); helpers nuevos `_cbuSameAccount`, `_bankFromKey`,
+  `getPublicBaseUrl()` (= `PUBLIC_BASE_URL`); `BankMovement` suma `provider`, `processedEvents`, `fromKey`, `resolutionNote`, `outKind`,
+  `payoutId`; `Comprobante` suma `finproVerifyStatus/finproVerify`; `PendingPayout` suma `fp*` y `hgSendUnknown`. No hay barra de Finpro en
+  🏦 Banco ni `finproEnabled` en la bandeja (no existen acá).
+- **Datos de producción:** no se renombró ninguna clave de `Config`. Claves nuevas: `finpro`, `finproAccounts`, `bankProvider`, `bankShown`,
+  `bankRotation`, `bankRotationLap`, `bankrotationlock`. Los `BankMovement` viejos no tienen `provider` (= hgcash; se filtra con
+  `{ $in: ['hgcash', null] }`).
+- **Pendiente del owner:** cargar las cuentas de Finpro en el panel (API key/secret, secreto del webhook, nuestro CVU + alias), dar de alta
+  en Finpro el webhook `<dominio>/api/finpro/webhook` (el callback de retiros viaja en cada pago). Las credenciales NO van en el repo.
+  ⚠️ Las cuentas hgcash ya cargadas SIN CBU de 22 dígitos o sin alias no se van a poder EDITAR hasta completarlos (#212); siguen funcionando.
+- **Validado:** `node --check` (server.js, admin.js, admin-sw.js, modelos, finproService, tests), `node scripts/check-tdz.js`,
+  `node scripts/test-finpro-accounts.js` (43), `test-finpro-webhook.js` (17), `test-bank-rotation.js` (19), `test-casino-url.js` (9).
+  **No probado** contra los bancos reales ni con el server levantado (no hay node_modules acá).
 
 ## Sesión 2026-11-04
+- **Guard de fichas (réplica AUTOREEMBOLSOS #217):** el `/pay` por hgcash lleva `debitConfirmed !== true`, igual que el de Finpro: reintentar un pago que ya descontó fichas no vuelve a descontar.
 
 ### 122. Sección propia "🏛️ Bancos — Configuración" debajo de COMANDOS (réplica del #224 de CARGASGIROXactivo) — admin-sw v44
 - **Owner:** "lo de separar bancos de comandos, la última modificación de CARGASGIROXactivo, implementala en todas". Es el mismo cambio del #224

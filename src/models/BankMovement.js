@@ -16,6 +16,15 @@ const mongoose = require('mongoose');
 const bankMovementSchema = new mongoose.Schema({
   // id interno del movimiento que manda hgcash (UUID). Único → dedupe de webhooks.
   movementId: { type: String, required: true, unique: true, index: true },
+  // #202 Banco que lo originó: 'hgcash' (webhook; default para lo histórico) | 'finpro'
+  // (webhook secundario `eventType 'finpro.webhook'`, o verificación por comprobante
+  // `verify/incoming` `eventType 'finpro.verify'`; movementId = 'fp:<notification_id>' o
+  // 'fp:coelsa:<coelsa>' / 'fp:auth:<autorización>'; además se dedupea por coelsaCode).
+  // Para Finpro, `accountKey` = perfil de Config['finproAccounts'] ('f1'…) por el que entró.
+  provider: { type: String, default: 'hgcash', index: true },
+  // #202 Orígenes/eventos ya procesados de este movimiento ('finpro.verify', 'finpro.webhook'…)
+  // → un aviso repetido se descarta (dedupe por evento + id).
+  processedEvents: { type: [String], default: [] },
   externalId: { type: String, default: null },     // id externo del banco/red
   coelsaCode: { type: String, default: null, index: true },
 
@@ -69,6 +78,12 @@ const bankMovementSchema = new mongoose.Schema({
   chargeError: { type: String, default: null },
   chargeAttempts: { type: Number, default: 0 }, // intentos de auto-carga fallidos
   chargedAt: { type: Date, default: null },
+
+  // #123 (réplica #202 de AUTOREEMBOLSOSjygactivo) — campos que usa el libro de Finpro
+  fromKey: { type: String, default: null, index: true }, // titular de origen normalizado (_normName)
+  resolutionNote: { type: String, default: null },       // motivo por el que un movimiento quedó 'ignored'
+  outKind: { type: String, default: null },              // salientes: payout | unknown
+  payoutId: { type: String, default: null },             // PendingPayout.id del retiro que originó la salida
 
   createdAt: { type: Date, default: Date.now, index: true }
 }, {

@@ -48,6 +48,7 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
 - `jugaygana-movements.js` — endpoint alterno (deposit/withdraw/balance).
 - `src/services/jugayganaService.js` — cliente refactorizado (lo usa referidos).
 - `src/services/jugayganaPublisherSessions.js` — pool de sesiones por publicista.
+- `src/services/finproService.js` — cliente de Finpro, el SEGUNDO banco con API (#123; hgcash es el primero). Detalle en `docs/ARCHITECTURE.md` §11.
 - `src/models/` — schemas Mongoose canónicos (fuente de verdad).
 - `src/services/` — lógica (referidos, notificaciones, otp, metaCapi, fbAds, hgcash,
   comprobantes IA, analítica publicistas…).
@@ -154,6 +155,25 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   (`hgAccountKey`): toda consulta nueva a hgcash sobre un pago existente tiene que pasar `_hgTokenFor(x.hgAccountKey)`, y todo
   flujo nuevo que pague tiene que guardar `hgAccountKey: _hgActiveKey`. No volver a leer `process.env.HGCASH_API_TOKEN` directo:
   usar `hgcashPay.getToken()` / `_hgcashWebhookSecretEntries()`.
+- **Dos bancos con API: hgcash y Finpro (#123 — réplica #202–#216 de AUTOREEMBOLSOSjygactivo):** tres llaves en
+  **🏛️ Bancos — Configuración → 🏦 Bancos automáticos**: por dónde ENTRAN las cargas (`hgcash.enabled` / `Config['finpro'].enabled`), por dónde
+  SALEN los retiros (`getBankProvider()`) y qué cuenta VE el cliente (`getBankShown()`: solo ese banco reescribe `Config['cbu']`, y al
+  reescribirlo NO se hereda nada de la cuenta anterior). Las cuentas Finpro (`Config['finproAccounts']`, cifradas, panel > SSM) funcionan como
+  las de hgcash: una EN USO, las otras de respaldo. Reglas: un pago existente se consulta con **`_fpCtxFor(p.fpAccountKey)`**, nunca con la
+  cuenta en uso; todo flujo nuevo que pague por Finpro guarda `fpAccountKey`; `_hgMovementAutoOff(m)` cubre los dos bancos (seguir usándolo);
+  un `BankMovement` sin `provider` es de hgcash; **nunca se reenvía un lote de Finpro sin respuesta** (se consulta con `_finproSyncPayout`);
+  un texto nuevo sobre una carga usa `_bankLabel(m.provider)`; `handlePayoutStatusWebhook(p, provider)` ignora avisos de un banco distinto
+  a `payout.paidVia` (DONE cruzado = alerta "POSIBLE PAGO DOBLE") y un `ERROR` tardío solo actúa sobre pagos `paying`. Una cuenta no se guarda
+  sin CBU/CVU de 22 dígitos + alias, y no se editan credenciales/CVU ni se borra una cuenta con pagos `paying` suyos. Las credenciales NO van
+  en el repo. El HTML del panel no debe repetir ids (el bloque hgcash estuvo duplicado entre COMANDOS y Bancos — Configuración). En este repo
+  NO hay `plat.*`, bandeja del banco, cierre diario ni Telegram (`telegramAlert` es un stub inerte): la plata va por los clientes JUGAYGANA
+  de siempre. Detalle en `docs/ARCHITECTURE.md` §11. Tests: `node scripts/test-finpro-accounts.js` y `node scripts/test-finpro-webhook.js`
+  (recortan bloques reales de server.js por marcadores de texto: `const FINPRO_DEFAULTS`, `async function _banksPayload`,
+  `const _finproLastProcessByCvu`).
+- **Rotación automática de cuentas (#123, #207 de la fuente):** `_bankRotationTick` puede cambiar SOLA la cuenta en uso (y, entre bancos,
+  `bankShown` / `bankProvider`). Nada debe asumir que la cuenta en uso es la misma que hace un rato: seguir usando `hgAccountKey` /
+  `fpAccountKey` del pago. Un banco o cuenta nuevos se suman a `_rotSlots()` / `_rotProbe` / `_rotSlotBlocked`. Todo apagado por defecto;
+  el tope del mes no da vueltas. Test: `node scripts/test-bank-rotation.js`.
 
 ## Flujo de trabajo del asistente
 
