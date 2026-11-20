@@ -821,3 +821,9 @@ queda el log de la card. Test `scripts/test-bank-rotation.js`.
 - `POST /api/admin/payouts/:id/pay` acepta `body.provider` (`'hgcash'|'finpro'`) para pagar ESE retiro por el otro banco y `confirmOtherBank`
   tras un 409 `needsConfirm`. `GET /api/admin/payouts` trae `bankProvider`, `bankAccount`, `otherBank`, `otherReady`, `otherAccount`.
   Botones del banner del chat: Pagar / Pagar nuevamente · Pagar con otro banco · Ya lo pagué por fuera (`payOtherBank`, marca pagado a mano).
+
+### Cuenta en uso: cambio manual y registro (#124)
+Cualquier rol del panel menos `comunidad` cambia la cuenta que ve el cliente con el botón fijo "🏦" (`bankQuickChip`, `admin.js`) →
+`POST /api/admin/bank-in-use` (`_bankCanSwitch`). Todo cambio MANUAL (ese botón, la barra, o "USAR ESTA" en las cards de hgcash/Finpro)
+queda en `Config['bankSwitchLog']` vía `_bankSwitchLog` (quién, rol, hora, de cuál a cuál); se lee con `GET /api/admin/bank-in-use/log`.
+Un camino nuevo que cambie la cuenta en uso a mano tiene que llamar a `_bankSwitchLog`.
