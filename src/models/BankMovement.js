@@ -82,7 +82,7 @@ const bankMovementSchema = new mongoose.Schema({
   // #123 (réplica #202 de AUTOREEMBOLSOSjygactivo) — campos que usa el libro de Finpro
   fromKey: { type: String, default: null, index: true }, // titular de origen normalizado (_normName)
   resolutionNote: { type: String, default: null },       // motivo por el que un movimiento quedó 'ignored'
-  outKind: { type: String, default: null },              // salientes: payout | unknown
+  outKind: { type: String, default: null },              // salientes: payout | unknown | sweep (solo etiqueta: acá no hay bajadas)
   payoutId: { type: String, default: null },             // PendingPayout.id del retiro que originó la salida
 
   createdAt: { type: Date, default: Date.now, index: true }

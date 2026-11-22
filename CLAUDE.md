@@ -170,6 +170,18 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   de siempre. Detalle en `docs/ARCHITECTURE.md` §11. Tests: `node scripts/test-finpro-accounts.js` y `node scripts/test-finpro-webhook.js`
   (recortan bloques reales de server.js por marcadores de texto: `const FINPRO_DEFAULTS`, `async function _banksPayload`,
   `const _finproLastProcessByCvu`).
+- **Pagos de retiros: candado anti pago doble (#125 — réplica #219–#221 de AUTOREEMBOLSOSjygactivo, incidente 2026-11-20 analizado allá):**
+  la idempotencia del banco solo vale dentro de UNA cuenta. Todo camino que mande un retiro llama a `_payoutResendGuard(...)` antes de
+  reclamarlo, `_payoutNoteSend(...)` justo antes del POST al banco y `_payoutNoteResult(...)` con la respuesta. En hgcash el token va
+  EXPLÍCITO (`createCashOut({ token })`, cuenta fijada al empezar el pedido), nunca el global de "la cuenta en uso". No aflojar la espera de
+  2 minutos ni dar por "rechazado" un envío sin respuesta clara. Test: `node scripts/test-payout-guard.js`.
+- **Retiro "VERIFICANDO" (#125):** un envío a hgcash sin respuesta clara deja el retiro `failed` + `hgSendUnknown` + `verifyUntil` (3 min):
+  el pago pudo haber salido. Toda ruta que pague, marque pagado, rechace o descarte un `PendingPayout` llama a `_payoutVerifyBlock(payout)`
+  primero. El cartel del chat (`?status=chat`) muestra también EN PROCESO y FALLADO: no volver a esconderlos.
+- **Salientes del banco SIEMPRE vinculados (#125):** una salida que el banco informa sin vínculo a un retiro (`outKind:'unknown'`; el webhook
+  de hgcash la clasifica por el `externalID`) dispara `_alertUnknownOutbound` ("POSIBLE PAGO DOBLE" en el chat; acá sin Telegram: el stub).
+  Todo flujo nuevo que saque plata del banco tiene que mandar su `externalID` / dejar `payoutId`, o va a alertar en falso. Un pago confirmado
+  por Finpro manda `maybeSendFinproReceipt` (comprobante en texto con COELSA, `/sys_payout_receipt_finpro`). Detalle: ARCHITECTURE §11.9–11.13.
 - **Rotación automática de cuentas (#123, #207 de la fuente):** `_bankRotationTick` puede cambiar SOLA la cuenta en uso (y, entre bancos,
   `bankShown` / `bankProvider`). Nada debe asumir que la cuenta en uso es la misma que hace un rato: seguir usando `hgAccountKey` /
   `fpAccountKey` del pago. Un banco o cuenta nuevos se suman a `_rotSlots()` / `_rotProbe` / `_rotSlotBlocked`. Todo apagado por defecto;
