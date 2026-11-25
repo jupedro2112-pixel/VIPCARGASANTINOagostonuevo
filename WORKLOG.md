@@ -51,6 +51,41 @@
   conoce la forma exacta de `GET /accounts` cuando el token ve varias cuentas (se asume que trae `name` y `netBalance`/`balance`): lo
   primero a mirar tras el deploy es el bloque nuevo del panel, que muestra qué cuenta real debita cada perfil.
 
+**#126c — correcciones de las DOS auditorías independientes del #126 (2026-11-25, réplica #223c de AUTOREEMBOLSOSjygactivo, commits
+`0f22895` y `c01b064` de la fuente) — admin-sw v49:**
+- *Titulares (`_hgPickApiAccount`, `_hgDebitNote`):* fijada > única > CBU > titular IGUAL en forma compacta ("S.A." = "SA"; vale
+  titular, accountName y etiqueta) > titular CONTENIDO por PALABRAS ENTERAS (`_hgNameWords` / `_hgNameContains`; solo titular y
+  accountName, nunca la etiqueta) > id guardado > adivinar. Antes "JUANA" matcheaba "JUAN ALVAREZ" y un titular exacto perdía si otra
+  cuenta lo contenía.
+- *Alta / edición de perfil:* `_hgValidateCreds` conserva `cbu`/`cvu`/`accountNumber`/`holderName`/`alias` de cada cuenta que ve el
+  token; `_hgIdForNewToken(prof, v)` decide el id (la única, o la que se identifica por CBU / titular; si no, null + aviso) en el
+  alta/edición Y en la ruta legacy `/api/admin/hgcash/credentials`, que ya NO guarda "la primera" (limpia `payAccountId`; el
+  `accountId` global de `Config['hgcash']` queda null si el token ve varias). Esto cierra lo que la entrada de arriba dejaba anotado
+  como pendiente de la ruta legacy.
+- *Pago doble (lo más importante):* (a) `resolveHgcashAccountId({ acct })` — un pago con perfil fijado ya NO usa "la cuenta del
+  último movimiento" como respaldo si hgcash no responde (podía ser de otra cuenta y el `externalID` no deduplica entre cuentas):
+  sin cuenta cierta, el pago no sale; (b) `PendingPayout.lastSendAccountId` + `_payoutNoteSend(…, realAccountId)` +
+  `_payoutResendGuard(…, realAccountId)`: "misma ruta" exige también la misma cuenta REAL del banco → mismo perfil con otra cuenta
+  real = espera de 2 min + confirmación; el reintento por 403 actualiza la cuenta anotada; Finpro no pasa cuenta real (queda null,
+  se comporta como antes); (c) `_payoutPickSource(body, monto, prev)`: en "la de más saldo", un REINTENTO con envío anterior no
+  rechazado con claridad vuelve por la MISMA cuenta (`why:'retry-same'`) si sigue existiendo; cambiar de cuenta en un reintento solo
+  lo hace una persona con "🏦 Elegir cuenta"; (d) `_paySlotNoWebhook`: un perfil hgcash sin secreto propio queda fuera de la elección
+  automática SOLO si otro perfil tiene secreto (si ninguno tiene, los avisos entran por el de AWS y todas participan); el panel lo marca.
+- *Otros:* alcanza con que la cuenta ELEGIDA tenga token (antes exigía `hgcashPay.isEnabled()` = la cuenta en uso); la respuesta del
+  pago trae `paidFrom` (hgcash y Finpro) y el aviso muestra "SALIÓ POR …" (escapado); el selector de cuenta a fijar muestra moneda y estado.
+- *Llamadores revisados:* `_payoutNoteSend` y `_payoutResendGuard` tienen 2 cada uno (hgcash y Finpro, los dos dentro de `/pay`);
+  `_payoutPickSource` y `resolveHgcashAccountId` solo se llaman desde `/pay`. Con el modo por defecto (`active`) todo sale como antes;
+  no se tocó `externalID` / `process_id`, la espera de 2 minutos ni ninguna confirmación.
+- **Queda SIN hacer:** no hay alarma de "posible pago doble" entre dos cuentas del MISMO banco (solo entre bancos); un retiro fallado
+  ANTES de este deploy no tiene `lastSendAccountId` (el candado lo trata como antes: mirarlo en el banco antes de reintentar por otra
+  cuenta real); los perfiles con id guardado de antes que no matcheen por CBU / titular siguen con ese id → revisarlos UNA vez en
+  "¿De qué CUENTA salen los retiros?".
+- **Validación:** `node --check` de los archivos tocados, `check-tdz`, los 6 `scripts/test-*.js` antes y después en verde
+  (`test-payout-source.js` 30 → 47 casos, incluye "ninguna función declarada dos veces en server.js"; `test-payout-guard.js` 12 → 14).
+  Chequeo de funciones duplicadas en server.js y admin.js: vacío antes y después.
+- **NO probado:** contra hgcash ni Finpro reales, ni el panel en un navegador, ni el server levantado (no hay node_modules). Sigue sin
+  conocerse la forma real de `GET /accounts` con un token que ve varias cuentas (se asume que trae `cbu`/`cvu` y `name`).
+
 ## Sesión 2026-11-22
 
 ### 125. 🛑 Candado anti PAGO DOBLE + retiro "VERIFICANDO" + alerta de pagos hechos por FUERA de la app + comprobante Finpro + la IA lee el COELSA + cuenta fuera de la rotación — réplica #219, #220 y #221 de AUTOREEMBOLSOSjygactivo — admin-sw v47

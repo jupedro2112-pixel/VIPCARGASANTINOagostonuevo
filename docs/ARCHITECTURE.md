@@ -785,6 +785,15 @@ saldos por `_paySlotInfo`, caché 20 s). La ruta `/pay` lo deja en `req._paySrc`
 cuenta elegida ya no existe se responde 400 antes de reclamar el retiro (no se cae a la que está en uso).
 En hgcash, la cuenta REAL que debita un perfil la decide `_hgPickApiAccount` (fijada a mano `payAccountId` > única > CBU > titular >
 id guardado > adivinar): un token puede ver varias cuentas. `_hgLastApiPick` recuerda lo último resuelto (para la nota interna).
+**Titulares:** igualdad por `_hgNameKey` (compacto) y luego "contiene" por palabras enteras con `_hgNameContains` (nunca la etiqueta
+del perfil); `_normName` es OTRA cosa (identidad bancaria / anti-multicuenta). Al cargar un token, `_hgIdForNewToken` (también en la
+ruta legacy `/api/admin/hgcash/credentials`): nunca "la primera" si ve varias.
+**Candado por cuenta REAL (#126c, #223c de la fuente):** el envío guarda `PendingPayout.lastSendAccountId` (id de la cuenta del banco;
+null en Finpro) y `_payoutResendGuard(…, realAccountId)` trata como "otra ruta" al mismo perfil con otra cuenta real.
+`resolveHgcashAccountId({ acct })` (pago) no usa el respaldo "último movimiento" (devuelve null → el pago no sale). `richest` en un
+reintento no rechazado vuelve por la misma cuenta (`_payoutPickSource(body, monto, prev)`, `why:'retry-same'`); un perfil hgcash sin
+secreto de webhook no se elige solo si otro perfil sí tiene (`_paySlotNoWebhook`). **Sin hacer:** no hay alarma de pago doble entre dos
+cuentas del MISMO banco; los retiros fallados antes del #126c no tienen `lastSendAccountId`.
 Endpoints: `GET/POST /api/admin/payout-sources` · `POST /api/admin/hgcash/accounts/:key/pay-account`.
 **Trampas:** la rotación y "USAR ESTA" no cambian de dónde salen los retiros si el modo es `fixed` / `richest`; las bajadas
 siguen por la cuenta en uso; un flujo nuevo que pague no debe leer `_hgActiveKey` / `_fpActiveAccount()` directo si corre
