@@ -182,6 +182,11 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   de hgcash la clasifica por el `externalID`) dispara `_alertUnknownOutbound` ("POSIBLE PAGO DOBLE" en el chat; acá sin Telegram: el stub).
   Todo flujo nuevo que saque plata del banco tiene que mandar su `externalID` / dejar `payoutId`, o va a alertar en falso. Un pago confirmado
   por Finpro manda `maybeSendFinproReceipt` (comprobante en texto con COELSA, `/sys_payout_receipt_finpro`). Detalle: ARCHITECTURE §11.9–11.13.
+- **De qué cuenta sale un retiro (#126, #223 de la fuente):** lo decide `_payoutPickSource` (elegida para ese retiro >
+  `Config['payoutSource']`: en uso / fija / la de más saldo) y queda en `req._paySrc`; los dos caminos de pago usan ESA cuenta, no "la
+  que está en uso", y el candado recibe la cuenta REAL que paga. Un token de hgcash puede ver varias cuentas: la de un perfil la resuelve
+  `_hgPickApiAccount` (fijada a mano > CBU > titular); nunca volver a tomar "la primera de la lista" ni saltar sola a otra cuenta tras
+  un fallo. Detalle en `docs/ARCHITECTURE.md` §11.4b. Test: `node scripts/test-payout-source.js`.
 - **Rotación automática de cuentas (#123, #207 de la fuente):** `_bankRotationTick` puede cambiar SOLA la cuenta en uso (y, entre bancos,
   `bankShown` / `bankProvider`). Nada debe asumir que la cuenta en uso es la misma que hace un rato: seguir usando `hgAccountKey` /
   `fpAccountKey` del pago. Un banco o cuenta nuevos se suman a `_rotSlots()` / `_rotProbe` / `_rotSlotBlocked`. Todo apagado por defecto;
